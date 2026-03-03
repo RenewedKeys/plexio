@@ -229,8 +229,15 @@ async def play_transcode(
     stream, ensuring that heartbeat sessions are only created for streams
     that are genuinely being watched — not just listed.
     """
-    padded = play_params + '=' * (-len(play_params) % 4)
-    data = json.loads(base64.urlsafe_b64decode(padded))
+    try:
+        # Restore base64 padding that was stripped for URL safety
+        padded = play_params + '=' * (-len(play_params) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Invalid play parameters',
+        ) from exc
 
     await session_manager.start_session(
         server_url=str(configuration.streaming_url),
