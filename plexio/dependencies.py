@@ -6,6 +6,7 @@ from fastapi import Request
 from sentry_sdk import set_user
 
 from plexio.models.addon import AddonConfiguration
+from plexio.session_manager import SessionManager
 
 
 def get_http_client(request: Request) -> ClientSession:
@@ -14,6 +15,10 @@ def get_http_client(request: Request) -> ClientSession:
 
 def get_cache(request: Request):
     return request.state.cache
+
+
+def get_session_manager(request: Request) -> SessionManager:
+    return request.state.session_manager
 
 
 def get_addon_configuration(base64_cfg: str | None = None) -> AddonConfiguration | None:
