@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from plexio.cache import init_cache
 from plexio.routers.addon import router as addon_router
 from plexio.routers.configuration import router as configuration_router
+from plexio.session_manager import SessionManager
 from plexio.settings import settings
 
 
@@ -28,12 +29,15 @@ async def lifespan(app: FastAPI):
         headers={'accept': 'application/json'},
     )
     cache = init_cache(settings)
+    session_manager = SessionManager()
 
     yield {
         'plex_client': plex_client,
         'cache': cache,
+        'session_manager': session_manager,
     }
 
+    await session_manager.cleanup()
     await plex_client.close()
     await cache.close()
 

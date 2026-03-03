@@ -1,4 +1,3 @@
-from itertools import chain
 from typing import Annotated
 
 from aiohttp import ClientSession
@@ -10,6 +9,7 @@ from plexio.dependencies import (
     get_addon_configuration,
     get_cache,
     get_http_client,
+    get_session_manager,
     set_sentry_user,
 )
 from plexio.models import PLEX_TO_STREMIO_MEDIA_TYPE, STREMIO_TO_PLEX_MEDIA_TYPE
@@ -30,6 +30,7 @@ from plexio.plex.media_server_api import (
     get_section_media,
     stremio_to_plex_id,
 )
+from plexio.session_manager import SessionManager
 
 router = APIRouter()
 router.dependencies.append(Depends(set_sentry_user))
@@ -169,6 +170,7 @@ async def get_stream(
     http: Annotated[ClientSession, Depends(get_http_client)],
     cache: Annotated[Redis, Depends(get_cache)],
     configuration: Annotated[AddonConfiguration, Depends(get_addon_configuration)],
+    session_manager: Annotated[SessionManager, Depends(get_session_manager)],
     stremio_type: StremioMediaType,
     media_id: str,
 ) -> StremioStreamsResponse:
@@ -194,8 +196,18 @@ async def get_stream(
         token=configuration.access_token,
         guid=plex_id,
     )
-    return StremioStreamsResponse(
-        streams=chain.from_iterable(
-            meta.get_stremio_streams(configuration) for meta in media
-        ),
-    )
+
+    all_streams = []
+    for meta in media:
+        streams, has_transcode = meta.get_stremio_streams(configuration)
+        all_streams.extend(streams)
+        if has_transcode and meta.rating_key and meta.duration:
+            await session_manager.start_session(
+                server_url=str(configuration.streaming_url),
+                access_token=configuration.access_token,
+                rating_key=meta.rating_key,
+                duration_ms=meta.duration,
+                media_key=f'/library/metadata/{meta.rating_key}',
+            )
+
+    return StremioStreamsResponse(streams=all_streams)

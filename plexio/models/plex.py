@@ -165,8 +165,9 @@ class PlexMediaMeta(BaseModel):
         from plexio.models.stremio import StremioStream
 
         streams = []
+        has_transcode = False
         for i, media in enumerate(self.media):
-            name = f'{configuration.server_name} {self.library_section_title}'
+            base_name = f'{configuration.server_name} {self.library_section_title}'
             filename = os.path.basename(media['Part'][0]['file'])
 
             audio_languages = set()
@@ -202,12 +203,13 @@ class PlexMediaMeta(BaseModel):
                 languages += f' ({"/".join(sorted(subtitles_languages))})'
 
             quality_description = f'Direct Play {media.get("videoResolution", "")}'
+            name = f'{base_name} [Direct Play]'
             streams.append(
                 StremioStream(
                     name=name,
                     description=description_template.format(
                         filename=filename,
-                        quality=quality_description,
+                        quality=f'🎬 {quality_description}',
                         languages=languages,
                     ),
                     url=str(
@@ -237,15 +239,17 @@ class PlexMediaMeta(BaseModel):
                 }
             )
             if configuration.include_transcode_original:
+                has_transcode = True
                 quality_description = (
                     f'Transcode {media.get("videoResolution", "")} (original)'
                 )
+                name = f'{base_name} ' f'[HLS Transcode]'
                 streams.append(
                     StremioStream(
                         name=name,
                         description=description_template.format(
                             filename=filename,
-                            quality=quality_description,
+                            quality=f'📡 {quality_description}',
                             languages=languages,
                         ),
                         url=str(transcode_url % {'videoQuality': 100}),
@@ -259,13 +263,15 @@ class PlexMediaMeta(BaseModel):
                     quality_params = RESOLUTION_QUALITY_PARAMS[quality]
                     if media['width'] <= quality_params['min_width']:
                         continue
+                    has_transcode = True
                     quality_description = f'Transcode {quality_params["name"]}'
+                    name = f'{base_name} [HLS {quality_params["name"]}]'
                     streams.append(
                         StremioStream(
                             name=name,
                             description=description_template.format(
                                 filename=filename,
-                                quality=quality_description,
+                                quality=f'📡 {quality_description}',
                                 languages=languages,
                             ),
                             url=str(transcode_url % quality_params['plex_args']),
@@ -277,13 +283,13 @@ class PlexMediaMeta(BaseModel):
             if configuration.include_plex_tv and self.guid.startswith('plex:'):
                 streams.append(
                     StremioStream(
-                        name=name,
+                        name=base_name,
                         description='Open on plex.tv (external)',
                         externalUrl=f'https://app.plex.tv/#!/provider/tv.plex.provider.metadata/details?key=/library/metadata/{self.guid.split("/")[-1]}',
                     ),
                 )
 
-        return streams
+        return streams, has_transcode
 
 
 class PlexEpisodeMeta(BaseModel):
