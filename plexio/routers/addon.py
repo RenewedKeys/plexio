@@ -1,7 +1,10 @@
+import base64
+import json
 from typing import Annotated
 
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from redis.asyncio.client import Redis
 
 from plexio import __version__
@@ -167,12 +170,14 @@ async def get_meta(
     response_model_exclude_none=True,
 )
 async def get_stream(
+    request: Request,
     http: Annotated[ClientSession, Depends(get_http_client)],
     cache: Annotated[Redis, Depends(get_cache)],
     configuration: Annotated[AddonConfiguration, Depends(get_addon_configuration)],
-    session_manager: Annotated[SessionManager, Depends(get_session_manager)],
     stremio_type: StremioMediaType,
     media_id: str,
+    installation_id: str,
+    base64_cfg: str,
 ) -> StremioStreamsResponse:
     if media_id.startswith('tt'):
         plex_id = await stremio_to_plex_id(
@@ -197,17 +202,49 @@ async def get_stream(
         guid=plex_id,
     )
 
+    play_url_prefix = (
+        str(request.base_url).rstrip('/') + f'/{installation_id}/{base64_cfg}/play/'
+    )
+
     all_streams = []
     for meta in media:
-        streams, has_transcode = meta.get_stremio_streams(configuration)
+        streams = meta.get_stremio_streams(
+            configuration,
+            play_url_prefix=play_url_prefix,
+        )
         all_streams.extend(streams)
-        if has_transcode and meta.rating_key and meta.duration:
-            await session_manager.start_session(
-                server_url=str(configuration.streaming_url),
-                access_token=configuration.access_token,
-                rating_key=meta.rating_key,
-                duration_ms=meta.duration,
-                media_key=f'/library/metadata/{meta.rating_key}',
-            )
 
     return StremioStreamsResponse(streams=all_streams)
+
+
+@router.get('/{installation_id}/{base64_cfg}/play/{play_params}.json')
+async def play_transcode(
+    configuration: Annotated[AddonConfiguration, Depends(get_addon_configuration)],
+    session_manager: Annotated[SessionManager, Depends(get_session_manager)],
+    play_params: str,
+):
+    """Start a heartbeat session and redirect to the actual Plex transcode URL.
+
+    This endpoint is hit when the user actually starts playing a transcode
+    stream, ensuring that heartbeat sessions are only created for streams
+    that are genuinely being watched — not just listed.
+    """
+    try:
+        # Restore base64 padding that was stripped for URL safety
+        padded = play_params + '=' * (-len(play_params) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Invalid play parameters',
+        ) from exc
+
+    await session_manager.start_session(
+        server_url=str(configuration.streaming_url),
+        access_token=configuration.access_token,
+        rating_key=data['rk'],
+        duration_ms=data['d'],
+        media_key=data['mk'],
+    )
+
+    return RedirectResponse(url=data['url'], status_code=302)
