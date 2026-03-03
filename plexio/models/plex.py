@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 from datetime import datetime
 from enum import Enum
@@ -161,11 +163,10 @@ class PlexMediaMeta(BaseModel):
             genres=[g['tag'] for g in self.genre],
         )
 
-    def get_stremio_streams(self, configuration):
+    def get_stremio_streams(self, configuration, play_url_prefix=None):
         from plexio.models.stremio import StremioStream
 
         streams = []
-        has_transcode = False
         for i, media in enumerate(self.media):
             base_name = f'{configuration.server_name} {self.library_section_title}'
             filename = os.path.basename(media['Part'][0]['file'])
@@ -239,11 +240,15 @@ class PlexMediaMeta(BaseModel):
                 }
             )
             if configuration.include_transcode_original:
-                has_transcode = True
                 quality_description = (
                     f'Transcode {media.get("videoResolution", "")} (original)'
                 )
                 name = f'{base_name} ' f'[HLS Transcode]'
+                actual_url = str(transcode_url % {'videoQuality': 100})
+                stream_url = self._build_play_url(
+                    play_url_prefix,
+                    actual_url,
+                )
                 streams.append(
                     StremioStream(
                         name=name,
@@ -252,9 +257,12 @@ class PlexMediaMeta(BaseModel):
                             quality=f'📡 {quality_description}',
                             languages=languages,
                         ),
-                        url=str(transcode_url % {'videoQuality': 100}),
+                        url=stream_url,
                         subtitles=external_subtitles,
-                        behaviorHints={'bingeGroup': quality_description},
+                        behaviorHints={
+                            'bingeGroup': quality_description,
+                            'notWebReady': True,
+                        },
                     ),
                 )
 
@@ -263,9 +271,15 @@ class PlexMediaMeta(BaseModel):
                     quality_params = RESOLUTION_QUALITY_PARAMS[quality]
                     if media['width'] <= quality_params['min_width']:
                         continue
-                    has_transcode = True
                     quality_description = f'Transcode {quality_params["name"]}'
                     name = f'{base_name} [HLS {quality_params["name"]}]'
+                    actual_url = str(
+                        transcode_url % quality_params['plex_args'],
+                    )
+                    stream_url = self._build_play_url(
+                        play_url_prefix,
+                        actual_url,
+                    )
                     streams.append(
                         StremioStream(
                             name=name,
@@ -274,9 +288,12 @@ class PlexMediaMeta(BaseModel):
                                 quality=f'📡 {quality_description}',
                                 languages=languages,
                             ),
-                            url=str(transcode_url % quality_params['plex_args']),
+                            url=stream_url,
                             subtitles=external_subtitles,
-                            behaviorHints={'bingeGroup': quality_description},
+                            behaviorHints={
+                                'bingeGroup': quality_description,
+                                'notWebReady': True,
+                            },
                         ),
                     )
 
@@ -289,7 +306,26 @@ class PlexMediaMeta(BaseModel):
                     ),
                 )
 
-        return streams, has_transcode
+        return streams
+
+    def _build_play_url(self, play_url_prefix, actual_url):
+        """Wrap a transcode URL with the play proxy for deferred session start."""
+        if not play_url_prefix or not self.rating_key or not self.duration:
+            return actual_url
+        play_data = {
+            'url': actual_url,
+            'rk': self.rating_key,
+            'd': self.duration,
+            'mk': f'/library/metadata/{self.rating_key}',
+        }
+        encoded = (
+            base64.urlsafe_b64encode(
+                json.dumps(play_data).encode(),
+            )
+            .decode()
+            .rstrip('=')
+        )
+        return play_url_prefix + encoded + '.json'
 
 
 class PlexEpisodeMeta(BaseModel):
