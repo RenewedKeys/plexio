@@ -11,6 +11,7 @@
 - **`BASE_URL` env var** — sets the public origin used for install-URL generation behind a reverse proxy / Tailscale Funnel, instead of relying on `window.location.origin`. (0.3.0)
 - **Server-side sessions (optional)** — install URLs can reference a stored session id (`/{session_id}/...`) instead of embedding the full config (including the Plex token) as base64. Config is persisted in SQLite under `/data`; legacy base64 URLs continue to work unchanged. Requires a writable `/data` volume (see Installation). (0.4.0)
 - **Encrypted sessions + revocation** — stored session config is Fernet-encrypted at rest (`SESSION_ENCRYPTION_KEY`, or an auto-generated `session.key` next to the DB). Operators can list and revoke sessions via admin-gated `GET` / `DELETE /api/v1/sessions` (`ADMIN_KEY`). (0.4.1)
+- **Configure page uses sessions by default** — the configure UI now creates a server-side session on install and generates the short `/{session_id}/manifest.json` URL (Plex token never in the URL), automatically falling back to the legacy base64 URL if the session store is disabled or unreachable. (0.4.2)
 
 ## Installation
 
@@ -27,7 +28,6 @@ Or build from source with `docker build -t plexio-fork .`.
 ## Roadmap
 
 See [ISSUES](https://github.com/natedogg058/plexio/issues) for open work. Planned fork-specific additions:
-- `BASE_URL` env var for reverse proxy / Tailscale Funnel deployments
 - Documentation expansion for self-hosting behind reverse proxies
 - Investigation of upstream toggle-default behaviour
 
