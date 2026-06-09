@@ -31,3 +31,20 @@ export const getPublicConfig = async (): Promise<{ baseUrl: string }> => {
     return { baseUrl: '' };
   }
 };
+
+export const createSession = async (
+  configuration: object,
+  label?: string,
+): Promise<string | null> => {
+  try {
+    const url =
+      `${window.location.origin}/api/v1/sessions` +
+      (label ? `?label=${encodeURIComponent(label)}` : '');
+    const response = await axios.post(url, configuration, { timeout: 15000 });
+    return response.data?.session_id || null;
+  } catch (error) {
+    // Sessions disabled (404) or unreachable: caller falls back to base64.
+    console.error('Error creating session:', error);
+    return null;
+  }
+};

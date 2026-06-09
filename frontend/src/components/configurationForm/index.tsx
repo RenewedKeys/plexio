@@ -20,7 +20,7 @@ import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button.tsx';
 import { Form } from '@/components/ui/form';
 import usePMSSections from '@/hooks/usePMSSections.tsx';
-import { getPublicConfig } from '@/services/BackendService.tsx';
+import { createSession, getPublicConfig } from '@/services/BackendService.tsx';
 
 interface Props {
   servers: PlexServer[];
@@ -51,22 +51,43 @@ const ConfigurationForm: FC<Props> = ({ servers }) => {
   const discoveryUrl = form.watch('discoveryUrl');
   const sections = usePMSSections(discoveryUrl, server?.accessToken || null);
 
-  function onSubmit(configuration: any, event: any) {
+  async function onSubmit(configuration: any, event: any) {
+    // Read which button submitted before any await (the native event's
+    // submitter must be captured synchronously).
+    const action = event.nativeEvent.submitter.name;
+
     configuration.version = __APP_VERSION__;
     configuration.accessToken = server?.accessToken;
     configuration.sections = configuration.sections.filter((item: any) =>
       sections.find((s) => s.key === item.key),
     );
 
-    const encodedConfiguration = base64_encode(JSON.stringify(configuration));
     // Prefer operator-configured BASE_URL when set (for reverse-proxy deployments
     // where window.location.origin may not match the public-facing URL).
     // Falls back to window.location.origin for default localhost deployments.
     const origin = baseUrl || window.location.origin;
-    const addonUrl = `${origin}/${uuidv4()}/${encodedConfiguration}/manifest.json`;
 
-    if (event.nativeEvent.submitter.name === 'clipboard') {
-      navigator.clipboard.writeText(addonUrl);
+    // Prefer a server-side session so the Plex token never appears in the URL.
+    // Fall back to the legacy base64 install URL if sessions are disabled (404)
+    // or the request fails.
+    const sessionId = await createSession(
+      configuration,
+      configuration.serverName,
+    );
+    let addonUrl: string;
+    if (sessionId) {
+      addonUrl = `${origin}/${sessionId}/manifest.json`;
+    } else {
+      const encodedConfiguration = base64_encode(JSON.stringify(configuration));
+      addonUrl = `${origin}/${uuidv4()}/${encodedConfiguration}/manifest.json`;
+    }
+
+    if (action === 'clipboard') {
+      try {
+        await navigator.clipboard.writeText(addonUrl);
+      } catch {
+        window.prompt('Copy your Plexio install URL:', addonUrl);
+      }
     } else {
       window.location.href = addonUrl.replace(/https?:\/\//, 'stremio://');
     }
