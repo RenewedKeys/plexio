@@ -23,3 +23,7 @@ RUN pip install -e . --no-cache-dir
 COPY --from=build /app/dist frontend
 
 COPY unit-nginx-config.json /docker-entrypoint.d/config.json
+
+# Session storage (0.4.0): create /data owned by the unit app user (uid 999) so a
+# mounted named volume inherits writable ownership for the SQLite session DB.
+RUN mkdir -p /data && chown unit:unit /data

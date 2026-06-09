@@ -36,6 +36,7 @@ router.dependencies.append(Depends(set_sentry_user))
 
 
 @router.get('/manifest.json', response_model_exclude_none=True)
+@router.get('/{session_id}/manifest.json', response_model_exclude_none=True)
 @router.get(
     '/{installation_id}/{base64_cfg}/manifest.json', response_model_exclude_none=True
 )
@@ -45,6 +46,7 @@ async def get_manifest(
         Depends(get_addon_configuration),
     ],
     installation_id: str | None = None,
+    session_id: str | None = None,
 ) -> StremioManifest:
     catalogs = []
     description = 'Play movies and series from plex.tv.'
@@ -66,7 +68,7 @@ async def get_manifest(
             )
 
         name += f' ({configuration.server_name})'
-        description += f' Your installation ID: {installation_id}'
+        description += f' Your installation ID: {installation_id or session_id}'
 
     return StremioManifest(
         id='com.stremio.plexio',
@@ -93,6 +95,14 @@ async def get_manifest(
     )
 
 
+@router.get(
+    '/{session_id}/catalog/{stremio_type}/{catalog_id}.json',
+    response_model_exclude_none=True,
+)
+@router.get(
+    '/{session_id}/catalog/{stremio_type}/{catalog_id}/{extra}.json',
+    response_model_exclude_none=True,
+)
 @router.get(
     '/{installation_id}/{base64_cfg}/catalog/{stremio_type}/{catalog_id}.json',
     response_model_exclude_none=True,
@@ -123,6 +133,10 @@ async def get_catalog(
     )
 
 
+@router.get(
+    '/{session_id}/meta/{stremio_type}/{plex_id:path}.json',
+    response_model_exclude_none=True,
+)
 @router.get(
     '/{installation_id}/{base64_cfg}/meta/{stremio_type}/{plex_id:path}.json',
     response_model_exclude_none=True,
@@ -161,6 +175,10 @@ async def get_meta(
     return StremioMetaResponse(meta=meta)
 
 
+@router.get(
+    '/{session_id}/stream/{stremio_type}/{media_id:path}.json',
+    response_model_exclude_none=True,
+)
 @router.get(
     '/{installation_id}/{base64_cfg}/stream/{stremio_type}/{media_id:path}.json',
     response_model_exclude_none=True,
