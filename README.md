@@ -12,6 +12,7 @@
 - **Server-side sessions (optional)** — install URLs can reference a stored session id (`/{session_id}/...`) instead of embedding the full config (including the Plex token) as base64. Config is persisted in SQLite under `/data`; legacy base64 URLs continue to work unchanged. Requires a writable `/data` volume (see Installation). (0.4.0)
 - **Encrypted sessions + revocation** — stored session config is Fernet-encrypted at rest (`SESSION_ENCRYPTION_KEY`, or an auto-generated `session.key` next to the DB). Operators can list and revoke sessions via admin-gated `GET` / `DELETE /api/v1/sessions` (`ADMIN_KEY`). (0.4.1)
 - **Configure page uses sessions by default** — the configure UI now creates a server-side session on install and generates the short `/{session_id}/manifest.json` URL (Plex token never in the URL), automatically falling back to the legacy base64 URL if the session store is disabled or unreachable. (0.4.2)
+- **Idempotent session creation** — submitting an identical config returns the existing session instead of minting a duplicate, keeping the admin session list clean (e.g. clicking clipboard then Install no longer creates two). (0.4.3)
 
 ## Installation
 
