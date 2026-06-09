@@ -4,7 +4,7 @@ from aiohttp import ClientSession
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from yarl import URL
 
-from plexio.dependencies import get_http_client
+from plexio.dependencies import get_http_client, verify_admin_key
 from plexio.models.addon import AddonConfiguration
 from plexio.plex.media_server_api import check_server_connection
 from plexio.settings import settings
@@ -65,3 +65,32 @@ async def create_session(
         )
     session_id = await store.create(config, label=label)
     return {'session_id': session_id}
+
+
+@router.get('/sessions', dependencies=[Depends(verify_admin_key)])
+async def list_sessions(request: Request):
+    """List stored sessions (metadata only, never tokens). Requires X-Admin-Key."""
+    store = getattr(request.state, 'sessions', None)
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='Sessions are not enabled',
+        )
+    return {'sessions': await store.list()}
+
+
+@router.delete('/sessions/{session_id}', dependencies=[Depends(verify_admin_key)])
+async def delete_session(request: Request, session_id: str):
+    """Revoke (delete) a stored session by id. Requires X-Admin-Key."""
+    store = getattr(request.state, 'sessions', None)
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='Sessions are not enabled',
+        )
+    if not await store.delete(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='Session not found',
+        )
+    return {'deleted': session_id}

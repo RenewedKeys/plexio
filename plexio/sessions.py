@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 import aiosqlite
+from cryptography.fernet import Fernet, InvalidToken
 
 from plexio.models.addon import AddonConfiguration
 
@@ -23,6 +24,25 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _init_fernet(settings) -> Fernet:
+    """Resolve the Fernet key. An operator-provided SESSION_ENCRYPTION_KEY takes
+    precedence; otherwise use (or create) a persistent key file next to the DB so
+    tokens are encrypted at rest by default with no configuration required."""
+    key = settings.session_encryption_key
+    if key:
+        return Fernet(key if isinstance(key, bytes) else key.encode())
+    parent = os.path.dirname(settings.session_db_path) or '.'
+    key_path = os.path.join(parent, 'session.key')
+    if os.path.exists(key_path):
+        with open(key_path, 'rb') as f:
+            return Fernet(f.read().strip())
+    new_key = Fernet.generate_key()
+    with open(key_path, 'wb') as f:
+        f.write(new_key)
+    os.chmod(key_path, 0o600)
+    return Fernet(new_key)
+
+
 async def init_sessions(settings):
     """Open the SQLite session store and ensure the schema exists.
 
@@ -34,10 +54,11 @@ async def init_sessions(settings):
     parent = os.path.dirname(settings.session_db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    fernet = _init_fernet(settings)
     db = await aiosqlite.connect(settings.session_db_path)
     await db.execute(_CREATE_TABLE)
     await db.commit()
-    return SessionStore(db)
+    return SessionStore(db, fernet)
 
 
 class SessionStore:
@@ -48,18 +69,20 @@ class SessionStore:
     exactly as the legacy decode path does.
     """
 
-    def __init__(self, db: aiosqlite.Connection):
+    def __init__(self, db: aiosqlite.Connection, fernet: Fernet):
         self._db = db
+        self._fernet = fernet
 
     async def create(self, config: dict, label: str | None = None) -> str:
         session_id = str(uuid.uuid4())
         server_name = config.get('serverName') or config.get('server_name')
         now = _utcnow()
+        payload = self._fernet.encrypt(json.dumps(config).encode()).decode()
         await self._db.execute(
             'INSERT INTO sessions '
             '(session_id, config_json, label, server_name, created_at, last_used_at) '
             'VALUES (?, ?, ?, ?, ?, ?)',
-            (session_id, json.dumps(config), label, server_name, now, now),
+            (session_id, payload, label, server_name, now, now),
         )
         await self._db.commit()
         return session_id
@@ -72,12 +95,28 @@ class SessionStore:
             row = await cur.fetchone()
         if row is None:
             return None
-        await self._db.execute(
-            'UPDATE sessions SET last_used_at = ? WHERE session_id = ?',
-            (_utcnow(), session_id),
-        )
+        stored = row[0]
+        try:
+            plain = self._fernet.decrypt(stored.encode()).decode()
+            reencrypted = None
+        except InvalidToken:
+            # Legacy plaintext row (pre-0.4.1): read as-is, then migrate it.
+            plain = stored
+            reencrypted = self._fernet.encrypt(plain.encode()).decode()
+        now = _utcnow()
+        if reencrypted is not None:
+            await self._db.execute(
+                'UPDATE sessions SET config_json = ?, last_used_at = ? '
+                'WHERE session_id = ?',
+                (reencrypted, now, session_id),
+            )
+        else:
+            await self._db.execute(
+                'UPDATE sessions SET last_used_at = ? WHERE session_id = ?',
+                (now, session_id),
+            )
         await self._db.commit()
-        return AddonConfiguration(**json.loads(row[0]))
+        return AddonConfiguration(**json.loads(plain))
 
     async def list(self) -> list[dict]:
         async with self._db.execute(

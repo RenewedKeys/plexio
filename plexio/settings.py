@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     session_db_path: str = '/data/sessions.db'
     admin_key: str | None = None  # gates session list/revoke endpoints; 403 if unset
     enable_sessions: bool = True
+    session_encryption_key: str | None = None  # Fernet key; if unset, a key file is auto-created next to the DB
 
 
 settings = Settings()
