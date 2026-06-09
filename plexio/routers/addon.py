@@ -14,6 +14,7 @@ from plexio.dependencies import (
 )
 from plexio.models import PLEX_TO_STREMIO_MEDIA_TYPE, STREMIO_TO_PLEX_MEDIA_TYPE
 from plexio.models.addon import AddonConfiguration
+from plexio.models.plex import PlexMediaMeta
 from plexio.models.stremio import (
     StremioCatalog,
     StremioCatalogManifest,
@@ -27,12 +28,80 @@ from plexio.plex.media_server_api import (
     SORT_OPTIONS,
     get_all_episodes,
     get_media,
+    get_on_deck,
     get_section_media,
     stremio_to_plex_id,
 )
 
 router = APIRouter()
 router.dependencies.append(Depends(set_sentry_user))
+
+RECENT_SORT = 'Date Added (desc)'
+
+
+def _sections_of_type(configuration, stremio_type):
+    return [
+        s
+        for s in configuration.sections
+        if PLEX_TO_STREMIO_MEDIA_TYPE.get(s.type) == stremio_type
+    ]
+
+
+def _map_on_deck(items, configuration, stremio_type):
+    """Map raw Plex On Deck items to Stremio catalog metas of one type.
+
+    In-progress movies map directly; on-deck episodes are mapped up to their
+    parent series (deduped) so the row shows shows, not loose episodes."""
+    configured = {s.key for s in _sections_of_type(configuration, stremio_type)}
+    metas = []
+    seen = set()
+    for item in items:
+        section = str(item.get('librarySectionID', ''))
+        if configured and section not in configured:
+            continue
+        if stremio_type == StremioMediaType.movie and item.get('type') == 'movie':
+            if not item.get('guid'):
+                continue
+            metas.append(PlexMediaMeta(**item).to_stremio_meta_review(configuration))
+        elif (
+            stremio_type == StremioMediaType.series
+            and item.get('type') == 'episode'
+        ):
+            show_guid = item.get('grandparentGuid')
+            if not show_guid or show_guid in seen:
+                continue
+            seen.add(show_guid)
+            show = PlexMediaMeta(
+                guid=show_guid,
+                type='show',
+                title=item.get('grandparentTitle', ''),
+                thumb=item.get('grandparentThumb'),
+                librarySectionID=section,
+                addedAt=item.get('addedAt', 0),
+            )
+            metas.append(show.to_stremio_meta_review(configuration))
+    return metas
+
+
+async def _recently_added(http, configuration, stremio_type, skip):
+    """Recently added top-level items across configured sections of a type,
+    merged and sorted by date added. Reuses the section-media call with an
+    addedAt:desc sort, so it returns movies/shows, never loose episodes."""
+    results = []
+    for section in _sections_of_type(configuration, stremio_type):
+        results.extend(
+            await get_section_media(
+                client=http,
+                url=configuration.discovery_url,
+                token=configuration.access_token,
+                section_id=section.key,
+                search='',
+                skip=skip,
+                sort=RECENT_SORT,
+            )
+        )
+    results.sort(key=lambda m: m.added_at, reverse=True)
+    return [m.to_stremio_meta_review(configuration) for m in results[:100]]
 
 
 @router.get('/manifest.json', response_model_exclude_none=True)
@@ -53,6 +122,52 @@ async def get_manifest(
     name = 'Plexio'
 
     if configuration is not None:
+        has_movie = any(
+            PLEX_TO_STREMIO_MEDIA_TYPE.get(s.type) == StremioMediaType.movie
+            for s in configuration.sections
+        )
+        has_series = any(
+            PLEX_TO_STREMIO_MEDIA_TYPE.get(s.type) == StremioMediaType.series
+            for s in configuration.sections
+        )
+        hub_extra = [{'name': 'skip', 'isRequired': False}]
+        sv = configuration.server_name
+        if has_movie:
+            catalogs.append(
+                StremioCatalogManifest(
+                    id='plexio-ondeck',
+                    type=StremioMediaType.movie,
+                    name=f'Continue Watching - Movies | {sv}',
+                    extra=hub_extra,
+                ),
+            )
+        if has_series:
+            catalogs.append(
+                StremioCatalogManifest(
+                    id='plexio-ondeck',
+                    type=StremioMediaType.series,
+                    name=f'Continue Watching - Shows | {sv}',
+                    extra=hub_extra,
+                ),
+            )
+        if has_movie:
+            catalogs.append(
+                StremioCatalogManifest(
+                    id='plexio-recent',
+                    type=StremioMediaType.movie,
+                    name=f'Recently Added - Movies | {sv}',
+                    extra=hub_extra,
+                ),
+            )
+        if has_series:
+            catalogs.append(
+                StremioCatalogManifest(
+                    id='plexio-recent',
+                    type=StremioMediaType.series,
+                    name=f'Recently Added - Shows | {sv}',
+                    extra=hub_extra,
+                ),
+            )
         for section in configuration.sections:
             catalogs.append(
                 StremioCatalogManifest(
@@ -119,18 +234,28 @@ async def get_catalog(
     extra: str = '',
 ) -> StremioCatalog:
     extras = dict(e.split('=') for e in extra.split('&') if e)
-    media = await get_section_media(
-        client=http,
-        url=configuration.discovery_url,
-        token=configuration.access_token,
-        section_id=catalog_id,
-        search=extras.get('search', ''),
-        skip=extras.get('skip', 0),
-        sort=extras.get('sort', 'Title'),
-    )
-    return StremioCatalog(
-        metas=[m.to_stremio_meta_review(configuration) for m in media],
-    )
+    skip = extras.get('skip', 0)
+    if catalog_id == 'plexio-ondeck':
+        items = await get_on_deck(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+        )
+        metas = _map_on_deck(items, configuration, stremio_type)
+    elif catalog_id == 'plexio-recent':
+        metas = await _recently_added(http, configuration, stremio_type, skip)
+    else:
+        media = await get_section_media(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+            section_id=catalog_id,
+            search=extras.get('search', ''),
+            skip=skip,
+            sort=extras.get('sort', 'Title'),
+        )
+        metas = [m.to_stremio_meta_review(configuration) for m in media]
+    return StremioCatalog(metas=metas)
 
 
 @router.get(
