@@ -2,10 +2,11 @@ import base64
 import json
 
 from aiohttp import ClientSession
-from fastapi import HTTPException, Request, status
+from fastapi import Header, HTTPException, Request, status
 from sentry_sdk import set_user
 
 from plexio.models.addon import AddonConfiguration
+from plexio.settings import settings
 
 
 def get_http_client(request: Request) -> ClientSession:
@@ -51,3 +52,21 @@ def set_sentry_user(
     identifier = installation_id or session_id
     if identifier:
         set_user({'id': identifier})
+
+
+def verify_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
+    """Gate session administration (list/revoke) behind the ADMIN_KEY header.
+
+    Closed by default: if ADMIN_KEY is unset the endpoints are disabled (403),
+    so sessions can never be enumerated or deleted without an explicit key.
+    """
+    if not settings.admin_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Session administration is disabled (ADMIN_KEY unset)',
+        )
+    if x_admin_key != settings.admin_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Invalid or missing admin key',
+        )
