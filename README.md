@@ -10,6 +10,7 @@
 - **`behaviorHints.videoSize` on stream objects** — exposes each version's file size so clients can display or choose by size. (0.3.1)
 - **`BASE_URL` env var** — sets the public origin used for install-URL generation behind a reverse proxy / Tailscale Funnel, instead of relying on `window.location.origin`. (0.3.0)
 - **Server-side sessions (optional)** — install URLs can reference a stored session id (`/{session_id}/...`) instead of embedding the full config (including the Plex token) as base64. Config is persisted in SQLite under `/data`; legacy base64 URLs continue to work unchanged. Requires a writable `/data` volume (see Installation). (0.4.0)
+- **Encrypted sessions + revocation** — stored session config is Fernet-encrypted at rest (`SESSION_ENCRYPTION_KEY`, or an auto-generated `session.key` next to the DB). Operators can list and revoke sessions via admin-gated `GET` / `DELETE /api/v1/sessions` (`ADMIN_KEY`). (0.4.1)
 
 ## Installation
 
@@ -20,6 +21,8 @@ docker run -d -p 7777:80 -v plexio-data:/data ghcr.io/natedogg058/plexio:latest
 Or build from source with `docker build -t plexio-fork .`.
 
 **Persistent storage (sessions):** the optional server-side session store keeps a SQLite DB at `/data/sessions.db`. The image creates `/data` owned by the `unit` app user (uid 999), so a Docker **named volume** (as above) inherits writable ownership automatically. If you bind-mount a host directory instead, `chown 999:999` it first. Disable the store entirely with `ENABLE_SESSIONS=false`, in which case no `/data` access is needed.
+
+**Session env vars:** `ADMIN_KEY` enables and protects the list/revoke endpoints (unset = those endpoints return 403). `SESSION_ENCRYPTION_KEY` sets the Fernet key for encryption at rest; if unset, a key file is created automatically alongside the database.
 
 ## Roadmap
 
