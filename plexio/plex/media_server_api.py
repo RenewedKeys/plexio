@@ -94,6 +94,27 @@ async def get_section_media(
     return [PlexMediaMeta(**meta) for meta in metadata]
 
 
+async def get_on_deck(
+    *,
+    client: ClientSession,
+    url: URL,
+    token: str,
+) -> list[dict]:
+    """Return raw On Deck (continue watching / next up) items from Plex.
+
+    A mix of in-progress movies and next-up/in-progress episodes; the caller
+    maps them to Stremio catalog metas (episodes -> their parent series)."""
+    json = await get_json(
+        client=client,
+        url=url / 'library/onDeck',
+        params={
+            'includeGuids': 1,
+            'X-Plex-Token': token,
+        },
+    )
+    return json['MediaContainer'].get('Metadata', [])
+
+
 async def get_media(
     *,
     client: ClientSession,
