@@ -182,5 +182,11 @@ class SessionStore:
         await self._db.commit()
         return cur.rowcount > 0
 
+    async def ping(self) -> bool:
+        """Cheap liveness check that the store responds to a query."""
+        async with self._db.execute('SELECT 1') as cur:
+            await cur.fetchone()
+        return True
+
     async def close(self):
         await self._db.close()

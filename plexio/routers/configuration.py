@@ -4,7 +4,12 @@ from aiohttp import ClientSession
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from yarl import URL
 
-from plexio.dependencies import get_http_client, verify_admin_key
+from plexio import __version__
+from plexio.dependencies import (
+    get_addon_configuration,
+    get_http_client,
+    verify_admin_key,
+)
 from plexio.models.addon import AddonConfiguration
 from plexio.plex.media_server_api import check_server_connection
 from plexio.settings import settings
@@ -35,6 +40,49 @@ async def public_config():
     Empty string when unset -- frontend falls back to window.location.origin.
     """
     return {'base_url': settings.base_url or ''}
+
+
+@router.get('/health')
+async def health(request: Request):
+    """Liveness probe: confirm the app is up and its session store (if enabled)
+    is reachable. Does not contact any Plex server -- suitable for the container
+    healthcheck and uptime monitors. Returns 503 if the store is unreachable."""
+    store = getattr(request.state, 'sessions', None)
+    sessions_ok = True
+    if store is not None:
+        try:
+            await store.ping()
+        except Exception:
+            sessions_ok = False
+    if not sessions_ok:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='Session store unreachable',
+        )
+    return {
+        'status': 'ok',
+        'version': __version__,
+        'sessions': {'enabled': store is not None},
+    }
+
+
+@router.get('/health/{session_id}')
+async def health_backend(
+    request: Request,
+    session_id: str,
+    http: Annotated[ClientSession, Depends(get_http_client)],
+):
+    """Deep health check: resolve a session's config and probe whether its Plex
+    backend is reachable. Returns reachability only -- never the token. 404 if
+    the session is unknown or sessions are disabled. Point an uptime monitor here
+    to alert when the backing Plex server goes down, not just the web app."""
+    configuration = await get_addon_configuration(request, session_id=session_id)
+    reachable = await check_server_connection(
+        client=http,
+        url=configuration.discovery_url,
+        token=configuration.access_token,
+    )
+    return {'session_id': session_id, 'backend_reachable': reachable}
 
 
 @router.post('/sessions')

@@ -13,6 +13,7 @@
 - **Encrypted sessions + revocation** — stored session config is Fernet-encrypted at rest (`SESSION_ENCRYPTION_KEY`, or an auto-generated `session.key` next to the DB). Operators can list and revoke sessions via admin-gated `GET` / `DELETE /api/v1/sessions` (`ADMIN_KEY`). (0.4.1)
 - **Configure page uses sessions by default** — the configure UI now creates a server-side session on install and generates the short `/{session_id}/manifest.json` URL (Plex token never in the URL), automatically falling back to the legacy base64 URL if the session store is disabled or unreachable. (0.4.2)
 - **Idempotent session creation** — submitting an identical config returns the existing session instead of minting a duplicate, keeping the admin session list clean (e.g. clicking clipboard then Install no longer creates two). (0.4.3)
+- **Health endpoints** — `GET /api/v1/health` is a dependency-aware liveness probe (app + session store; 503 if the store is down), and `GET /api/v1/health/{session_id}` deep-checks whether that session's Plex backend is actually reachable (reachability only, never the token), so an uptime monitor can catch backend outages rather than just web-server outages. (0.5.0)
 
 ## Installation
 
