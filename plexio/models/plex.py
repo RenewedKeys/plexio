@@ -168,6 +168,7 @@ class PlexMediaMeta(BaseModel):
         for i, media in enumerate(self.media):
             name = f'{configuration.server_name} {self.library_section_title}'
             filename = os.path.basename(media['Part'][0]['file'])
+            video_size = media['Part'][0].get('size')
 
             audio_languages = set()
             subtitles_languages = set()
@@ -218,7 +219,7 @@ class PlexMediaMeta(BaseModel):
                         },
                     ),
                     subtitles=external_subtitles,
-                    behaviorHints={'bingeGroup': quality_description, 'filename': filename},
+                    behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
                 ),
             )
 
@@ -250,7 +251,7 @@ class PlexMediaMeta(BaseModel):
                         ),
                         url=str(transcode_url % {'videoQuality': 100}),
                         subtitles=external_subtitles,
-                        behaviorHints={'bingeGroup': quality_description, 'filename': filename},
+                        behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
                     ),
                 )
 
@@ -270,7 +271,7 @@ class PlexMediaMeta(BaseModel):
                             ),
                             url=str(transcode_url % quality_params['plex_args']),
                             subtitles=external_subtitles,
-                            behaviorHints={'bingeGroup': quality_description, 'filename': filename},
+                            behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
                         ),
                     )
 
