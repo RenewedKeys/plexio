@@ -7,10 +7,19 @@
 
 - **`behaviorHints.filename` on stream objects** — populates the Stremio-standard field used by clients for release fingerprinting (IntroDB skip intro, Trakt scrobbling, OpenSubtitles hash lookup). Closes a gap vs AIOStreams and other Stremio-standard addons. ([upstream PR #69](https://github.com/vanchaxy/plexio/pull/69))
 - **Wider default CORS regex** — covers localhost on any port, private LAN ranges (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`), Tailscale tailnet domains (`*.ts.net`), and `app.strem.io`. Reduces friction for self-hosted deployments behind reverse proxies or on Tailscale. `CORS_ORIGIN_REGEX` env var override is preserved.
+- **`behaviorHints.videoSize` on stream objects** — exposes each version's file size so clients can display or choose by size. (0.3.1)
+- **`BASE_URL` env var** — sets the public origin used for install-URL generation behind a reverse proxy / Tailscale Funnel, instead of relying on `window.location.origin`. (0.3.0)
+- **Server-side sessions (optional)** — install URLs can reference a stored session id (`/{session_id}/...`) instead of embedding the full config (including the Plex token) as base64. Config is persisted in SQLite under `/data`; legacy base64 URLs continue to work unchanged. Requires a writable `/data` volume (see Installation). (0.4.0)
 
 ## Installation
 
-Same as upstream — `docker run -d -p 7777:80 ghcr.io/natedogg058/plexio:latest` (once GHCR publish is enabled) or build from source with `docker build -t plexio-fork .`.
+Pull the published image:
+```bash
+docker run -d -p 7777:80 -v plexio-data:/data ghcr.io/natedogg058/plexio:latest
+```
+Or build from source with `docker build -t plexio-fork .`.
+
+**Persistent storage (sessions):** the optional server-side session store keeps a SQLite DB at `/data/sessions.db`. The image creates `/data` owned by the `unit` app user (uid 999), so a Docker **named volume** (as above) inherits writable ownership automatically. If you bind-mount a host directory instead, `chown 999:999` it first. Disable the store entirely with `ENABLE_SESSIONS=false`, in which case no `/data` access is needed.
 
 ## Roadmap
 
