@@ -47,7 +47,7 @@ def _sections_of_type(configuration, stremio_type):
     ]
 
 
-def _map_on_deck(items, configuration, stremio_type):
+async def _map_on_deck(http, items, configuration, stremio_type):
     """Map raw Plex On Deck items to Stremio catalog metas of one type.
 
     In-progress movies map directly; on-deck episodes are mapped up to their
@@ -71,15 +71,25 @@ def _map_on_deck(items, configuration, stremio_type):
             if not show_guid or show_guid in seen:
                 continue
             seen.add(show_guid)
-            show = PlexMediaMeta(
+            resolved = await get_media(
+                client=http,
+                url=configuration.discovery_url,
+                token=configuration.access_token,
                 guid=show_guid,
-                type='show',
-                title=item.get('grandparentTitle', ''),
-                thumb=item.get('grandparentThumb'),
-                librarySectionID=section,
-                addedAt=item.get('addedAt', 0),
+                get_only_first=True,
             )
-            metas.append(show.to_stremio_meta_review(configuration))
+            if resolved:
+                metas.append(resolved[0].to_stremio_meta_review(configuration))
+            else:
+                show = PlexMediaMeta(
+                    guid=show_guid,
+                    type='show',
+                    title=item.get('grandparentTitle', ''),
+                    thumb=item.get('grandparentThumb'),
+                    librarySectionID=section,
+                    addedAt=item.get('addedAt', 0),
+                )
+                metas.append(show.to_stremio_meta_review(configuration))
     return metas
 
 
@@ -241,7 +251,7 @@ async def get_catalog(
             url=configuration.discovery_url,
             token=configuration.access_token,
         )
-        metas = _map_on_deck(items, configuration, stremio_type)
+        metas = await _map_on_deck(http, items, configuration, stremio_type)
     elif catalog_id == 'plexio-recent':
         metas = await _recently_added(http, configuration, stremio_type, skip)
     else:

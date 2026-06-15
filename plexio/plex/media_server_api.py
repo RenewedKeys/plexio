@@ -142,6 +142,7 @@ async def get_media(
             params={
                 'X-Plex-Token': token,
                 'includeElements': 'Stream',
+                'includeGuids': 1,
             },
         )
         metadata = json['MediaContainer']['Metadata'][0]
