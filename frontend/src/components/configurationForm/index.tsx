@@ -11,6 +11,7 @@ import {
   StreamingUrlField,
   IncludeTranscodeDownFields,
   IncludePlexTvField,
+  ReportPlaybackField,
 } from '@/components/configurationForm/fields';
 import {
   formSchema,
@@ -41,6 +42,7 @@ const ConfigurationForm: FC<Props> = ({ servers }) => {
       includeTranscodeOriginal: false,
       includeTranscodeDown: false,
       includePlexTv: false,
+      reportPlayback: false,
       sections: [],
     },
   });
@@ -112,6 +114,7 @@ const ConfigurationForm: FC<Props> = ({ servers }) => {
         <IncludeTranscodeOriginalField form={form} />
         <IncludeTranscodeDownFields form={form} />
         <IncludePlexTvField form={form} />
+        <ReportPlaybackField form={form} />
 
         <div className="flex items-center space-x-1 justify-center p-3">
           <Button className="h-11 w-10 p-2" type="submit" name="clipboard">

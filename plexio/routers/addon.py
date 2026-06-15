@@ -2,7 +2,7 @@ from itertools import chain
 from typing import Annotated
 
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio.client import Redis
 
 from plexio import __version__
@@ -32,6 +32,8 @@ from plexio.plex.media_server_api import (
     get_section_media,
     stremio_to_plex_id,
 )
+from plexio.plex.playback import b64decode_path, proxy_playback
+from plexio.settings import settings
 
 router = APIRouter()
 router.dependencies.append(Depends(set_sentry_user))
@@ -319,6 +321,7 @@ async def get_meta(
     response_model_exclude_none=True,
 )
 async def get_stream(
+    request: Request,
     http: Annotated[ClientSession, Depends(get_http_client)],
     cache: Annotated[Redis, Depends(get_cache)],
     configuration: Annotated[AddonConfiguration, Depends(get_addon_configuration)],
@@ -347,8 +350,45 @@ async def get_stream(
         token=configuration.access_token,
         guid=plex_id,
     )
+    play_prefix = None
+    if configuration.report_playback:
+        base = (
+            settings.base_url
+            or f'{request.url.scheme}://{request.url.netloc}'
+        ).rstrip('/')
+        cfg_path = request.url.path.split('/stream/')[0]
+        play_prefix = f'{base}{cfg_path}/play'
     return StremioStreamsResponse(
         streams=chain.from_iterable(
-            meta.get_stremio_streams(configuration) for meta in media
+            meta.get_stremio_streams(configuration, play_prefix) for meta in media
         ),
+    )
+
+
+@router.get('/{session_id}/play/{rating_key}/{duration}/{part_b64}')
+@router.get(
+    '/{installation_id}/{base64_cfg}/play/{rating_key}/{duration}/{part_b64}'
+)
+async def get_play(
+    request: Request,
+    http: Annotated[ClientSession, Depends(get_http_client)],
+    configuration: Annotated[
+        AddonConfiguration, Depends(get_addon_configuration)
+    ],
+    rating_key: str,
+    duration: int,
+    part_b64: str,
+    session_id: str | None = None,
+    installation_id: str | None = None,
+):
+    if configuration is None or not configuration.report_playback:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return await proxy_playback(
+        request,
+        client=http,
+        configuration=configuration,
+        rating_key=rating_key,
+        duration_ms=duration,
+        part_key=b64decode_path(part_b64),
+        identifier=session_id or installation_id or 'plexio',
     )

@@ -5,3 +5,4 @@ export { SectionsField } from './sections.tsx';
 export { IncludeTranscodeOriginalField } from './includeTranscodeOriginal.tsx';
 export { IncludeTranscodeDownFields } from './includeTranscodeDown.tsx';
 export { IncludePlexTvField } from './includePlexTv.tsx';
+export { ReportPlaybackField } from './reportPlayback.tsx';

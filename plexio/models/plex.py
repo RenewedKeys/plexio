@@ -161,7 +161,9 @@ class PlexMediaMeta(BaseModel):
             genres=[g['tag'] for g in self.genre],
         )
 
-    def get_stremio_streams(self, configuration):
+    def get_stremio_streams(self, configuration, play_prefix=None):
+        import base64
+
         from plexio.models.stremio import StremioStream
 
         streams = []
@@ -203,6 +205,20 @@ class PlexMediaMeta(BaseModel):
                 languages += f' ({"/".join(sorted(subtitles_languages))})'
 
             quality_description = f'Direct Play {media.get("videoResolution", "")}'
+            if play_prefix:
+                rk = self.key.rsplit('/', 1)[-1]
+                pk = base64.urlsafe_b64encode(
+                    media['Part'][0]['key'].encode()
+                ).rstrip(b'=').decode()
+                direct_play_url = f"{play_prefix}/{rk}/{media.get('duration') or 0}/{pk}"
+            else:
+                direct_play_url = str(
+                    configuration.streaming_url
+                    / media['Part'][0]['key'][1:]
+                    % {
+                        'X-Plex-Token': configuration.access_token,
+                    },
+                )
             streams.append(
                 StremioStream(
                     name=name,
@@ -211,13 +227,7 @@ class PlexMediaMeta(BaseModel):
                         quality=quality_description,
                         languages=languages,
                     ),
-                    url=str(
-                        configuration.streaming_url
-                        / media['Part'][0]['key'][1:]
-                        % {
-                            'X-Plex-Token': configuration.access_token,
-                        },
-                    ),
+                    url=direct_play_url,
                     subtitles=external_subtitles,
                     behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
                 ),

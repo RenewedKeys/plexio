@@ -23,6 +23,14 @@
       }
     },
     {
+      "match": {
+        "uri": "*/play/*"
+      },
+      "action": {
+        "pass": "applications/backend"
+      }
+    },
+    {
       "action": {
         "share": "/app/frontend$uri",
         "fallback": {
