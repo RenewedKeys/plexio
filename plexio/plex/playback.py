@@ -2,20 +2,23 @@
 
 Active only when a configuration has report_playback enabled. The /stream handler
 emits a token-free /{cfg}/play/... URL pointing here; we proxy the bytes from the
-Plex part URL (token held server-side), forward Range requests, and report the
-playback position to Plex via /:/timeline. We do NOT scrobble -- Plex's own
-"video played" watched threshold decides watched from the reported position, so a
-partial view resumes at the exact point and a full playthrough marks watched.
+Plex part URL (token held server-side), forward Range requests, and report a
+watched-on-completion event to Plex via /:/timeline. We do NOT report intermediate
+positions -- a transparent byte proxy can only estimate the playhead linearly from
+bytes served, which is wrong under VBR and races ahead when a client bulk-buffers,
+producing bogus resume points. When a full playthrough has streamed we report
+state=stopped at the end so Plex's own "video played" threshold marks it watched.
+We do NOT scrobble.
 """
 import base64
-import time
 
 import aiohttp
 from fastapi.responses import StreamingResponse
 
 PLEX_PRODUCT = 'Plexio'
-PING_INTERVAL = 10.0      # seconds between timeline updates
-CHUNK = 1 << 16           # 64 KiB
+CHUNK = 1 << 16               # 64 KiB
+COMPLETE_FRACTION = 0.90      # byte position that counts as a full playthrough
+MIN_PLAYBACK_BYTES = 8 << 20  # ignore probes / small range reads (8 MiB)
 
 
 def b64decode_path(token: str) -> str:
@@ -90,34 +93,25 @@ async def proxy_playback(request, *, client, configuration, rating_key,
     }
 
     async def streamer():
+        # Report only a single watched-on-completion event; never intermediate
+        # positions (byte->time is unreliable and yields bogus resume points).
         streamed = 0
-        last_ping = 0.0
-        started = False
         try:
             async for chunk in resp.content.iter_chunked(CHUNK):
                 yield chunk
                 streamed += len(chunk)
-                if not total or not duration_ms:
-                    continue
-                now = time.monotonic()
-                if not started or now - last_ping >= PING_INTERVAL:
-                    started = True
-                    last_ping = now
-                    await _timeline(
-                        client, url=configuration.discovery_url,
-                        token=configuration.access_token, rating_key=rating_key,
-                        state='playing',
-                        time_ms=int((start + streamed) / total * duration_ms),
-                        duration_ms=duration_ms, identifier=identifier,
-                    )
         finally:
             resp.close()
-            if started and total and duration_ms:
+            complete = bool(
+                total and duration_ms
+                and streamed >= MIN_PLAYBACK_BYTES
+                and (start + streamed) >= total * COMPLETE_FRACTION
+            )
+            if complete:
                 await _timeline(
                     client, url=configuration.discovery_url,
                     token=configuration.access_token, rating_key=rating_key,
-                    state='stopped',
-                    time_ms=int((start + streamed) / total * duration_ms),
+                    state='stopped', time_ms=duration_ms,
                     duration_ms=duration_ms, identifier=identifier,
                 )
 
