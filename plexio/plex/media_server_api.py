@@ -115,6 +115,30 @@ async def get_on_deck(
     return json['MediaContainer'].get('Metadata', [])
 
 
+async def get_media_by_rating_key(
+    *,
+    client: ClientSession,
+    url: URL,
+    token: str,
+    rating_key: str,
+) -> list[PlexMediaMeta]:
+    json = await get_json(
+        client=client,
+        url=url / 'library/metadata' / rating_key,
+        params={
+            'X-Plex-Token': token,
+            'includeElements': 'Stream',
+            'includeGuids': 1,
+        },
+    )
+    metadata = json['MediaContainer'].get('Metadata', [])
+    return [
+        PlexMediaMeta(**item)
+        for item in metadata
+        if item.get('type') in ('show', 'movie', 'episode')
+    ]
+
+
 async def get_media(
     *,
     client: ClientSession,
