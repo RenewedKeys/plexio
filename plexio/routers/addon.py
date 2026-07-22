@@ -23,11 +23,16 @@ from plexio.models.stremio import (
     StremioMetaResponse,
     StremioStreamsResponse,
 )
-from plexio.models.utils import plexio_id_to_guid
+from plexio.models.utils import (
+    is_rating_key_plexio_id,
+    plexio_id_to_guid,
+    plexio_id_to_rating_key,
+)
 from plexio.plex.media_server_api import (
     SORT_OPTIONS,
     get_all_episodes,
     get_media,
+    get_media_by_rating_key,
     get_on_deck,
     get_section_media,
     stremio_to_plex_id,
@@ -65,10 +70,7 @@ async def _map_on_deck(http, items, configuration, stremio_type):
             if not item.get('guid'):
                 continue
             metas.append(PlexMediaMeta(**item).to_stremio_meta_review(configuration))
-        elif (
-            stremio_type == StremioMediaType.series
-            and item.get('type') == 'episode'
-        ):
+        elif stremio_type == StremioMediaType.series and item.get('type') == 'episode':
             show_guid = item.get('grandparentGuid')
             if not show_guid or show_guid in seen:
                 continue
@@ -287,14 +289,27 @@ async def get_meta(
     if not plex_id.startswith('plexio:'):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    guid = plexio_id_to_guid(plex_id)
-    media = await get_media(
-        client=http,
-        url=configuration.discovery_url,
-        token=configuration.access_token,
-        guid=guid,
-        get_only_first=True,
-    )
+    if is_rating_key_plexio_id(plex_id):
+        media = await get_media_by_rating_key(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+            rating_key=plexio_id_to_rating_key(plex_id),
+        )
+    else:
+        # Backward compatibility for previously generated plexio:<base64-guid>
+        # links.
+        try:
+            guid = plexio_id_to_guid(plex_id)
+        except (ValueError, UnicodeDecodeError):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        media = await get_media(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+            guid=guid,
+            get_only_first=True,
+        )
     if not media:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     media = media[0]
@@ -339,22 +354,82 @@ async def get_stream(
         )
         if not plex_id:
             return StremioStreamsResponse()
-    elif media_id.startswith('plexio:'):
-        plex_id = plexio_id_to_guid(media_id)
-    else:
-        plex_id = media_id
 
-    media = await get_media(
-        client=http,
-        url=configuration.discovery_url,
-        token=configuration.access_token,
-        guid=plex_id,
-    )
+        media = await get_media(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+            guid=plex_id,
+        )
+    elif is_rating_key_plexio_id(media_id):
+        rating_key_value = plexio_id_to_rating_key(media_id)
+        parts = rating_key_value.split(':')
+
+        if stremio_type == StremioMediaType.series and len(parts) == 3:
+            show_rating_key, season, episode = parts
+
+            shows = await get_media_by_rating_key(
+                client=http,
+                url=configuration.discovery_url,
+                token=configuration.access_token,
+                rating_key=show_rating_key,
+            )
+            if not shows:
+                return StremioStreamsResponse()
+
+            show = shows[0]
+            episodes = await get_all_episodes(
+                client=http,
+                url=configuration.discovery_url,
+                token=configuration.access_token,
+                key=show.key,
+            )
+
+            episode_rating_key = next(
+                (
+                    item.rating_key
+                    for item in episodes
+                    if str(item.parent_index) == season
+                    and str(item.index) == episode
+                ),
+                None,
+            )
+            if not episode_rating_key:
+                return StremioStreamsResponse()
+
+            media = await get_media_by_rating_key(
+                client=http,
+                url=configuration.discovery_url,
+                token=configuration.access_token,
+                rating_key=episode_rating_key,
+            )
+        else:
+            media = await get_media_by_rating_key(
+                client=http,
+                url=configuration.discovery_url,
+                token=configuration.access_token,
+                rating_key=rating_key_value,
+            )
+    elif media_id.startswith('plexio:'):
+        # Backward compatibility for legacy GUID-based internal IDs.
+        plex_id = plexio_id_to_guid(media_id)
+        media = await get_media(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+            guid=plex_id,
+        )
+    else:
+        media = await get_media(
+            client=http,
+            url=configuration.discovery_url,
+            token=configuration.access_token,
+            guid=media_id,
+        )
     play_prefix = None
     if configuration.report_playback:
         base = (
-            settings.base_url
-            or f'{request.url.scheme}://{request.url.netloc}'
+            settings.base_url or f'{request.url.scheme}://{request.url.netloc}'
         ).rstrip('/')
         cfg_path = request.url.path.split('/stream/')[0]
         play_prefix = f'{base}{cfg_path}/play'
@@ -366,15 +441,11 @@ async def get_stream(
 
 
 @router.get('/{session_id}/play/{rating_key}/{duration}/{part_b64}')
-@router.get(
-    '/{installation_id}/{base64_cfg}/play/{rating_key}/{duration}/{part_b64}'
-)
+@router.get('/{installation_id}/{base64_cfg}/play/{rating_key}/{duration}/{part_b64}')
 async def get_play(
     request: Request,
     http: Annotated[ClientSession, Depends(get_http_client)],
-    configuration: Annotated[
-        AddonConfiguration, Depends(get_addon_configuration)
-    ],
+    configuration: Annotated[AddonConfiguration, Depends(get_addon_configuration)],
     rating_key: str,
     duration: int,
     part_b64: str,

@@ -118,6 +118,7 @@ LANGUAGE_TO_EMOJI = {
 }
 
 PLEXIO_PREFIX = 'plexio:'
+PLEXIO_RATING_KEY_PREFIX = 'plexio:rk-'
 
 
 def get_flag_emoji(code):
@@ -135,7 +136,19 @@ def guid_to_plexio_id(guid: str) -> str:
 
 
 def plexio_id_to_guid(plexio_id: str) -> str:
-    encoded_guid = plexio_id[len(PLEXIO_PREFIX):]
-    padding = 4 - (len(encoded_guid) % 4)
+    encoded_guid = plexio_id[len(PLEXIO_PREFIX) :]
+    padding = (-len(encoded_guid)) % 4
     encoded_guid += '=' * padding
     return base64.urlsafe_b64decode(encoded_guid).decode()
+
+
+def rating_key_to_plexio_id(rating_key: str | int) -> str:
+    return f'{PLEXIO_RATING_KEY_PREFIX}{rating_key}'
+
+
+def is_rating_key_plexio_id(plexio_id: str) -> bool:
+    return plexio_id.startswith(PLEXIO_RATING_KEY_PREFIX)
+
+
+def plexio_id_to_rating_key(plexio_id: str) -> str:
+    return plexio_id[len(PLEXIO_RATING_KEY_PREFIX) :]

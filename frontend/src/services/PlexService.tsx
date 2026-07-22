@@ -7,10 +7,10 @@ export const createAuthPin = async (
   clientIdentifier: string,
 ): Promise<AuthPin> => {
   try {
-    const response = await axios.postForm(`${PLEX_API_URL}/pins`, {
-      strong: 'true',
-      'X-Plex-Product': PLEX_PRODUCT_NAME,
-      'X-Plex-Client-Identifier': clientIdentifier,
+    const response = await axios.post('/api/v1/plex-pin', null, {
+      headers: {
+        'X-Plex-Client-Identifier': clientIdentifier,
+      },
     });
 
     return response.data;
@@ -25,9 +25,11 @@ export const getAuthToken = async (
   clientIdentifier: string,
 ): Promise<string> => {
   try {
-    const response = await axios.get(`${PLEX_API_URL}/pins/${authPin.id}`, {
+    const response = await axios.get(`/api/v1/plex-token/${authPin.id}`, {
       params: {
         code: authPin.code,
+      },
+      headers: {
         'X-Plex-Client-Identifier': clientIdentifier,
       },
     });
@@ -67,10 +69,12 @@ export const getPlexServers = async (
   clientIdentifier: string,
 ): Promise<PlexServer[]> => {
   try {
-    const response = await axios.get(`${PLEX_API_URL}/resources`, {
+    const response = await axios.get('/api/v1/plex-resources', {
       params: {
         includeHttps: 1,
         includeRelay: 1,
+      },
+      headers: {
         'X-Plex-Token': token,
         'X-Plex-Client-Identifier': clientIdentifier,
       },
