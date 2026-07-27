@@ -319,6 +319,7 @@ class PlexMediaMeta(BaseModel):
                     'fastSeek': 1,
                     'copyts': 1,
                     'autoAdjustQuality': 0,
+                    'X-Plex-Platform': 'Chrome',
                     'X-Plex-Token': configuration.access_token,
                 }
             )
