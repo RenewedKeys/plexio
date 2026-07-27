@@ -200,6 +200,35 @@ class PlexMediaMeta(BaseModel):
             return f'{stem} [{tag}].{ext}'
         return f'{filename} [{tag}]'
 
+    @staticmethod
+    def _is_4k(media):
+        """Best-effort detection of 4K/UHD source media.
+
+        Some Plex-hosting providers block transcoding of 4K content outright
+        at the server level (resource protection), meaning only Direct Play
+        works for those titles. We check both signals Plex exposes rather
+        than trusting either alone:
+
+        - `width`: actual pixel width (e.g. 3840 for standard UHD, 4096 for
+          DCI cinema 4K). Threshold of 3840 catches standard and slightly
+          nonstandard 4K masters based on real dimensions, not just a label.
+        - `videoResolution`: Plex's string label (e.g. '4k'), used as a
+          fallback in case `width` is missing or unreliable in the metadata.
+
+        Either signal alone is enough to treat a title as 4K (an OR, not an
+        AND) — a false positive here just means we skip offering transcode
+        options for a title that might've actually been fine, whereas a
+        false negative means offering a transcode stream that fails outright
+        when played. That asymmetry is why this check is deliberately
+        permissive rather than strict.
+        """
+        try:
+            if int(media.get('width') or 0) >= 3840:
+                return True
+        except (TypeError, ValueError):
+            pass
+        return '4k' in str(media.get('videoResolution', '')).lower()
+
     def get_stremio_streams(self, configuration, play_prefix=None):
         import base64
 
@@ -294,7 +323,8 @@ class PlexMediaMeta(BaseModel):
                     'X-Plex-Token': configuration.access_token,
                 }
             )
-            if configuration.include_transcode_original:
+            is_4k_source = self._is_4k(media)
+            if configuration.include_transcode_original and not is_4k_source:
                 quality_description = (
                     f'Transcode {media.get("videoResolution", "")} (original)'
                 )
@@ -317,7 +347,7 @@ class PlexMediaMeta(BaseModel):
                     ),
                 )
 
-            if configuration.include_transcode_down:
+            if configuration.include_transcode_down and not is_4k_source:
                 for quality in configuration.transcode_down_qualities:
                     quality_params = RESOLUTION_QUALITY_PARAMS[quality]
                     if media['width'] <= quality_params['min_width']:
