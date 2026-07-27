@@ -180,6 +180,26 @@ class PlexMediaMeta(BaseModel):
             genres=[g['tag'] for g in self.genre],
         )
 
+    @staticmethod
+    def _tag_filename(filename, tag):
+        """Append a bracketed stream-type tag to a filename, just before the
+        extension.
+
+        Stremio-adjacent tools (e.g. AIOStreams) parse `behaviorHints.filename`
+        to derive quality/resolution info, and expose it verbatim as
+        `{stream.filename}` in custom formatters. Direct Play filenames are left
+        untouched elsewhere (they're real and used for hash/fingerprint-based
+        lookups — OpenSubtitles, IntroDB, Trakt scrobbling), but transcoded
+        variants don't correspond byte-for-byte to the original file anyway, so
+        we tag them here to make the stream type identifiable downstream, e.g.:
+
+            {stream.filename::~'[Transcode'["🔄 Transcoded"||"⚡ Direct Play"]}
+        """
+        stem, dot, ext = filename.rpartition('.')
+        if dot:
+            return f'{stem} [{tag}].{ext}'
+        return f'{filename} [{tag}]'
+
     def get_stremio_streams(self, configuration, play_prefix=None):
         import base64
 
@@ -278,6 +298,7 @@ class PlexMediaMeta(BaseModel):
                 quality_description = (
                     f'Transcode {media.get("videoResolution", "")} (original)'
                 )
+                transcode_filename = self._tag_filename(filename, 'Transcode')
                 streams.append(
                     StremioStream(
                         name=name,
@@ -290,7 +311,7 @@ class PlexMediaMeta(BaseModel):
                         subtitles=external_subtitles,
                         behaviorHints={
                             'bingeGroup': quality_description,
-                            'filename': filename,
+                            'filename': transcode_filename,
                             'videoSize': video_size,
                         },
                     ),
@@ -302,6 +323,9 @@ class PlexMediaMeta(BaseModel):
                     if media['width'] <= quality_params['min_width']:
                         continue
                     quality_description = f'Transcode {quality_params["name"]}'
+                    transcode_filename = self._tag_filename(
+                        filename, f'Transcode-{quality_params["name"]}'
+                    )
                     streams.append(
                         StremioStream(
                             name=name,
@@ -314,7 +338,7 @@ class PlexMediaMeta(BaseModel):
                             subtitles=external_subtitles,
                             behaviorHints={
                                 'bingeGroup': quality_description,
-                                'filename': filename,
+                                'filename': transcode_filename,
                                 'videoSize': video_size,
                             },
                         ),
