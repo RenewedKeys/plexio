@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { AuthPin, PlexServer, PlexUser } from '@/types/plex.tsx';
 
 const PLEX_PRODUCT_NAME = 'Plexio';
 const PLEX_API_URL = 'https://plex.tv/api/v2';
@@ -7,7 +8,7 @@ export const createAuthPin = async (
   clientIdentifier: string,
 ): Promise<AuthPin> => {
   try {
-    const response = await axios.post('/api/v1/plex-pin', null, {
+    const response = await axios.post<AuthPin>('/api/v1/plex-pin', null, {
       headers: {
         'X-Plex-Client-Identifier': clientIdentifier,
       },
@@ -25,14 +26,17 @@ export const getAuthToken = async (
   clientIdentifier: string,
 ): Promise<string> => {
   try {
-    const response = await axios.get(`/api/v1/plex-token/${authPin.id}`, {
-      params: {
-        code: authPin.code,
+    const response = await axios.get<{ authToken: string }>(
+      `/api/v1/plex-token/${authPin.id}`,
+      {
+        params: {
+          code: authPin.code,
+        },
+        headers: {
+          'X-Plex-Client-Identifier': clientIdentifier,
+        },
       },
-      headers: {
-        'X-Plex-Client-Identifier': clientIdentifier,
-      },
-    });
+    );
     return response.data.authToken;
   } catch (error) {
     console.error('Error auth token:', error);
@@ -45,7 +49,7 @@ export const getPlexUser = async (
   clientIdentifier: string,
 ): Promise<PlexUser | null> => {
   try {
-    const response = await axios.get(`${PLEX_API_URL}/user`, {
+    const response = await axios.get<PlexUser>(`${PLEX_API_URL}/user`, {
       params: {
         'X-Plex-Product': PLEX_PRODUCT_NAME,
         'X-Plex-Client-Identifier': clientIdentifier,
@@ -69,7 +73,7 @@ export const getPlexServers = async (
   clientIdentifier: string,
 ): Promise<PlexServer[]> => {
   try {
-    const response = await axios.get('/api/v1/plex-resources', {
+    const response = await axios.get<PlexServer[]>('/api/v1/plex-resources', {
       params: {
         includeHttps: 1,
         includeRelay: 1,
@@ -85,8 +89,8 @@ export const getPlexServers = async (
     }
 
     return response.data.filter(
-      (server: any) =>
-        server.provides.includes('server') && 'accessToken' in server,
+      (server) =>
+        server.provides.includes('server') && Boolean(server.accessToken),
     );
   } catch (error) {
     console.error('Error fetching Plex servers:', error);
