@@ -232,7 +232,8 @@ class PlexMediaMeta(BaseModel):
                     .decode()
                 )
                 direct_play_url = (
-                    f"{play_prefix}/{rk}/{media.get('duration') or 0}/{pk}"
+                    f"{play_prefix}/{rk}/"
+                    f"{self.duration or media.get('duration') or 0}/{pk}"
                 )
             else:
                 direct_play_url = str(

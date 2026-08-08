@@ -1,24 +1,25 @@
-"""Playback proxy: stream media through Plexio so progress can be reported to Plex.
+"""Proxy playback through Plexio and report conservative progress to Plex.
 
-Active only when a configuration has report_playback enabled. The /stream handler
-emits a token-free /{cfg}/play/... URL pointing here; we proxy the bytes from the
-Plex part URL (token held server-side), forward Range requests, and report a
-watched-on-completion event to Plex via /:/timeline. We do NOT report intermediate
-positions -- a transparent byte proxy can only estimate the playhead linearly from
-bytes served, which is wrong under VBR and races ahead when a client bulk-buffers,
-producing bogus resume points. When a full playthrough has streamed we report
-state=stopped at the end so Plex's own "video played" threshold marks it watched.
-We do NOT scrobble.
+Active only when a configuration has report_playback enabled. The stream handler
+emits a token-free /{cfg}/play/... URL pointing here. Direct-play bytes are proxied
+from Plex with Range support, while timeline positions advance by elapsed wall time
+instead of downloaded bytes. That avoids marking rapidly buffered media as watched
+while still recording ongoing watch time for clients that consume the stream during
+playback. We do not scrobble; Plex applies its own watched threshold.
 """
+
 import base64
+import logging
+import time
 
 import aiohttp
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 PLEX_PRODUCT = 'Plexio'
-CHUNK = 1 << 16               # 64 KiB
-COMPLETE_FRACTION = 0.90      # byte position that counts as a full playthrough
-MIN_PLAYBACK_BYTES = 8 << 20  # ignore probes / small range reads (8 MiB)
+CHUNK = 1 << 16  # 64 KiB
+PING_INTERVAL = 10.0  # seconds between Plex timeline updates
+
+logger = logging.getLogger(__name__)
 
 
 def b64decode_path(token: str) -> str:
@@ -30,27 +31,49 @@ def _client_id(identifier: str) -> str:
     return f'plexio-{identifier}'
 
 
-async def _timeline(client, *, url, token, rating_key, state, time_ms,
-                    duration_ms, identifier):
+async def _timeline(
+    client,
+    *,
+    url,
+    token,
+    rating_key,
+    state,
+    time_ms,
+    duration_ms,
+    identifier,
+):
+    timeline_url = (url / ':/timeline').with_query(
+        {
+            'ratingKey': rating_key,
+            'key': f'/library/metadata/{rating_key}',
+            'state': state,
+            'time': max(time_ms, 0),
+            'duration': max(duration_ms, 0),
+            'X-Plex-Token': token,
+        }
+    )
     try:
-        await client.get(
-            url / ':/timeline' % {
-                'ratingKey': rating_key,
-                'key': f'/library/metadata/{rating_key}',
-                'state': state,
-                'time': max(time_ms, 0),
-                'duration': max(duration_ms, 0),
-                'X-Plex-Token': token,
-            },
+        async with client.get(
+            timeline_url,
             headers={
                 'X-Plex-Client-Identifier': _client_id(identifier),
                 'X-Plex-Product': PLEX_PRODUCT,
                 'X-Plex-Device-Name': PLEX_PRODUCT,
             },
             timeout=aiohttp.ClientTimeout(total=5),
-        )
+        ) as response:
+            await response.read()
+            if response.status >= 400:
+                logger.warning(
+                    'Plex timeline update failed with HTTP %s',
+                    response.status,
+                )
+                return False
+        return True
     except Exception:
-        pass
+        # Timeline reporting is optional and must never interrupt playback.
+        logger.warning('Unable to send Plex timeline update', exc_info=True)
+        return False
 
 
 def _total_and_start(resp):
@@ -68,8 +91,25 @@ def _total_and_start(resp):
         return None, 0
 
 
-async def proxy_playback(request, *, client, configuration, rating_key,
-                         duration_ms, part_key, identifier):
+def _position_ms(*, total, start, duration_ms, started_at, now):
+    """Estimate playback from the requested byte offset plus elapsed time."""
+    if not duration_ms:
+        return 0
+    initial = int(start / total * duration_ms) if total else 0
+    elapsed = max(now - started_at, 0) * 1000
+    return min(int(initial + elapsed), duration_ms)
+
+
+async def proxy_playback(
+    request,
+    *,
+    client,
+    configuration,
+    rating_key,
+    duration_ms,
+    part_key,
+    identifier,
+):
     upstream = (
         configuration.streaming_url
         / part_key[1:]
@@ -80,7 +120,9 @@ async def proxy_playback(request, *, client, configuration, rating_key,
     if rng:
         fwd['Range'] = rng
 
-    resp = await client.get(
+    method = request.method.upper()
+    requester = client.head if method == 'HEAD' else client.get
+    resp = await requester(
         upstream,
         headers=fwd,
         timeout=aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60),
@@ -88,31 +130,74 @@ async def proxy_playback(request, *, client, configuration, rating_key,
     total, start = _total_and_start(resp)
     passthrough = {
         h: resp.headers[h]
-        for h in ('Content-Length', 'Content-Range', 'Accept-Ranges')
+        for h in (
+            'Content-Length',
+            'Content-Range',
+            'Accept-Ranges',
+            'Cache-Control',
+            'Content-Disposition',
+            'ETag',
+            'Last-Modified',
+        )
         if h in resp.headers
     }
 
+    if method == 'HEAD':
+        resp.close()
+        return Response(
+            status_code=resp.status,
+            headers=passthrough,
+            media_type=resp.headers.get('Content-Type'),
+        )
+
     async def streamer():
-        # Report only a single watched-on-completion event; never intermediate
-        # positions (byte->time is unreliable and yields bogus resume points).
-        streamed = 0
+        started_at = None
+        last_ping_at = 0.0
+        started = False
         try:
             async for chunk in resp.content.iter_chunked(CHUNK):
                 yield chunk
-                streamed += len(chunk)
+                now = time.monotonic()
+                if started_at is None:
+                    started_at = now
+                if not started or now - last_ping_at >= PING_INTERVAL:
+                    started = True
+                    last_ping_at = now
+                    await _timeline(
+                        client,
+                        url=configuration.discovery_url,
+                        token=configuration.access_token,
+                        rating_key=rating_key,
+                        state='playing',
+                        time_ms=_position_ms(
+                            total=total,
+                            start=start,
+                            duration_ms=duration_ms,
+                            started_at=started_at,
+                            now=now,
+                        ),
+                        duration_ms=duration_ms,
+                        identifier=identifier,
+                    )
         finally:
             resp.close()
-            complete = bool(
-                total and duration_ms
-                and streamed >= MIN_PLAYBACK_BYTES
-                and (start + streamed) >= total * COMPLETE_FRACTION
-            )
-            if complete:
+            if started and started_at is not None:
+                now = time.monotonic()
                 await _timeline(
-                    client, url=configuration.discovery_url,
-                    token=configuration.access_token, rating_key=rating_key,
-                    state='stopped', time_ms=duration_ms,
-                    duration_ms=duration_ms, identifier=identifier,
+                    client,
+                    url=configuration.discovery_url,
+                    token=configuration.access_token,
+                    rating_key=rating_key,
+                    state='stopped',
+                    time_ms=_position_ms(
+                        total=total,
+                        start=start,
+                        duration_ms=duration_ms,
+                        started_at=started_at,
+                        now=now,
+                    ),
+                    duration_ms=duration_ms,
+                    identifier=identifier,
                 )
 
     return StreamingResponse(

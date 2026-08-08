@@ -25,7 +25,9 @@ export const ReportPlaybackField: FC<Props> = ({ form }) => {
             <FormLabel className="text-base">Report playback to Plex</FormLabel>
             <FormDescription>
               Stream through Plexio so watch progress and watched state sync to
-              Plex. Off by default — routes media through this server.
+              Plex. Off by default — routes Direct Play media through this
+              server, which must be reachable from Stremio. Set BASE_URL when
+              using a reverse proxy that does not preserve forwarded headers.
             </FormDescription>
           </div>
           <FormControl>

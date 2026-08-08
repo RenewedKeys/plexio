@@ -4,6 +4,7 @@ from typing import Annotated
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio.client import Redis
+from yarl import URL
 
 from plexio import __version__
 from plexio.dependencies import (
@@ -44,6 +45,43 @@ router = APIRouter()
 router.dependencies.append(Depends(set_sentry_user))
 
 RECENT_SORT = 'Date Added (desc)'
+
+
+def _public_base_url(request: Request) -> str:
+    """Resolve the externally reachable base URL for playback proxy links."""
+    if settings.base_url:
+        candidate = settings.base_url
+    else:
+        forwarded_proto = request.headers.get('x-forwarded-proto')
+        forwarded_host = request.headers.get('x-forwarded-host')
+        scheme = (
+            forwarded_proto.split(',', 1)[0].strip()
+            if forwarded_proto
+            else request.url.scheme
+        )
+        host = (
+            forwarded_host.split(',', 1)[0].strip()
+            if forwarded_host
+            else request.url.netloc
+        )
+        candidate = f'{scheme}://{host}'
+
+    try:
+        public_url = URL(candidate)
+    except (TypeError, ValueError):
+        public_url = URL()
+    if (
+        public_url.scheme not in {'http', 'https'}
+        or not public_url.host
+        or public_url.user is not None
+        or public_url.query_string
+        or public_url.fragment
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Unable to determine the public Plexio URL',
+        )
+    return str(public_url).rstrip('/')
 
 
 def _sections_of_type(configuration, stremio_type):
@@ -389,8 +427,7 @@ async def get_stream(
                 (
                     item.rating_key
                     for item in episodes
-                    if str(item.parent_index) == season
-                    and str(item.index) == episode
+                    if str(item.parent_index) == season and str(item.index) == episode
                 ),
                 None,
             )
@@ -431,9 +468,7 @@ async def get_stream(
         )
     play_prefix = None
     if configuration.report_playback:
-        base = (
-            settings.base_url or f'{request.url.scheme}://{request.url.netloc}'
-        ).rstrip('/')
+        base = _public_base_url(request)
         cfg_path = request.url.path.split('/stream/')[0]
         play_prefix = f'{base}{cfg_path}/play'
     return StremioStreamsResponse(
@@ -443,8 +478,14 @@ async def get_stream(
     )
 
 
-@router.get('/{session_id}/play/{rating_key}/{duration}/{part_b64}')
-@router.get('/{installation_id}/{base64_cfg}/play/{rating_key}/{duration}/{part_b64}')
+@router.api_route(
+    '/{session_id}/play/{rating_key}/{duration}/{part_b64}',
+    methods=['GET', 'HEAD'],
+)
+@router.api_route(
+    '/{installation_id}/{base64_cfg}/play/{rating_key}/{duration}/{part_b64}',
+    methods=['GET', 'HEAD'],
+)
 async def get_play(
     request: Request,
     http: Annotated[ClientSession, Depends(get_http_client)],

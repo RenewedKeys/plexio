@@ -15,3 +15,12 @@ class ApplicationTests(TestCase):
                 '/api/v1/plex-resources',
             }.issubset(paths)
         )
+
+    def test_playback_routes_accept_get_and_head(self):
+        play_routes = [
+            route
+            for route in app.routes
+            if route.path == '/{session_id}/play/{rating_key}/{duration}/{part_b64}'
+        ]
+        self.assertEqual(len(play_routes), 1)
+        self.assertTrue({'GET', 'HEAD'}.issubset(play_routes[0].methods))
