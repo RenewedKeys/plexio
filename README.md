@@ -15,6 +15,8 @@
 - **Idempotent session creation** — submitting an identical config returns the existing session instead of minting a duplicate, keeping the admin session list clean (e.g. clicking clipboard then Install no longer creates two). (0.4.3)
 - **Health endpoints** — `GET /api/v1/health` is a dependency-aware liveness probe (app + session store; 503 if the store is down), and `GET /api/v1/health/{session_id}` deep-checks whether that session's Plex backend is actually reachable (reachability only, never the token), so an uptime monitor can catch backend outages rather than just web-server outages. (0.5.0)
 - **Continue Watching & Recently Added catalogs** — adds discovery rows to the Stremio board: "Continue Watching" (Plex On Deck — in-progress movies plus next-up/in-progress episodes, the latter surfaced as their parent series, deduped) and "Recently Added", each split into Movies / Shows and shown only for the library types you've configured. Catalog items resolve through the normal meta/stream flow (imdb-matched where Plex has the id). Discovery rows only — these don't feed Stremio's native Continue Watching bar, and a series row opens the show page rather than resuming the exact episode. (0.6.0)
+- **Hybrid IMDb/rating-key IDs** — keeps standard IMDb IDs when Plex provides them, then falls back to validated Plex rating-key IDs for unmatched and personal movies, shows, and episodes. This restores stream resolution in Fusion and other Stremio-compatible clients without breaking legacy Plexio IDs. (0.8.0)
+- **Server-side Plex authentication proxy** — proxies PIN creation, token exchange, and server discovery through the backend so self-hosted installs no longer depend on Plex allowing browser-side cross-origin requests. Inputs and upstream failures are validated and covered by regression tests. (0.8.0)
 
 ## Installation
 
@@ -106,4 +108,3 @@ For bug reports, feature requests, or general questions, join our
 [Discord support forum](https://discord.gg/8RWUkebmDs).
 
 Alternatively, you can open an issue directly in this repository.
-
