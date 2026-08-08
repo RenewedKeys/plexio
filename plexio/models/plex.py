@@ -4,7 +4,12 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from plexio.models.utils import get_flag_emoji, guid_to_plexio_id, to_camel
+from plexio.models.utils import (
+    get_flag_emoji,
+    guid_to_plexio_id,
+    rating_key_to_plexio_id,
+    to_camel,
+)
 
 
 class Resolution(str, Enum):
@@ -105,7 +110,11 @@ class PlexMediaMeta(BaseModel):
         from plexio.models.stremio import StremioMeta
 
         return StremioMeta(
-            id=guid_to_plexio_id(self.guid),
+            id=(
+                rating_key_to_plexio_id(self.rating_key)
+                if self.rating_key
+                else guid_to_plexio_id(self.guid)
+            ),
             type=PLEX_TO_STREMIO_MEDIA_TYPE[self.type],
             name=self.title,
             releaseInfo=self.get_year(),
@@ -132,14 +141,24 @@ class PlexMediaMeta(BaseModel):
         from plexio.models import PLEX_TO_STREMIO_MEDIA_TYPE
         from plexio.models.stremio import StremioMetaPreview
 
-        stremio_id = None
-        guids = self.guids
-        for guid in guids:
-            if guid['id'].startswith('imdb://'):
-                stremio_id = guid['id'][7:]
+        # Prefer IMDb when Plex has a valid IMDb GUID. This lets Fusion and
+        # other metadata addons provide their normal metadata while Plexio
+        # continues to resolve streams through its IMDb matching path.
+        stremio_id = next(
+            (
+                guid.get('id', '')[7:]
+                for guid in self.guids
+                if guid.get('id', '').startswith('imdb://')
+            ),
+            None,
+        )
 
+        # Personal, unmatched and custom-agent media without IMDb metadata
+        # use a Plex-native rating-key ID and Plexio's own metadata endpoint.
         if not stremio_id:
-            if '://' in self.guid:
+            if self.rating_key:
+                stremio_id = rating_key_to_plexio_id(self.rating_key)
+            elif '://' in self.guid:
                 stremio_id = guid_to_plexio_id(self.guid)
             else:
                 stremio_id = self.guid
@@ -161,7 +180,7 @@ class PlexMediaMeta(BaseModel):
             genres=[g['tag'] for g in self.genre],
         )
 
-    def get_stremio_streams(self, configuration, play_prefix=None):
+    def get_stremio_streams(self, configuration, play_prefix=None):  # noqa: C901
         import base64
 
         from plexio.models.stremio import StremioStream
@@ -207,10 +226,14 @@ class PlexMediaMeta(BaseModel):
             quality_description = f'Direct Play {media.get("videoResolution", "")}'
             if play_prefix:
                 rk = self.key.rsplit('/', 1)[-1]
-                pk = base64.urlsafe_b64encode(
-                    media['Part'][0]['key'].encode()
-                ).rstrip(b'=').decode()
-                direct_play_url = f"{play_prefix}/{rk}/{media.get('duration') or 0}/{pk}"
+                pk = (
+                    base64.urlsafe_b64encode(media['Part'][0]['key'].encode())
+                    .rstrip(b'=')
+                    .decode()
+                )
+                direct_play_url = (
+                    f"{play_prefix}/{rk}/{media.get('duration') or 0}/{pk}"
+                )
             else:
                 direct_play_url = str(
                     configuration.streaming_url
@@ -229,7 +252,11 @@ class PlexMediaMeta(BaseModel):
                     ),
                     url=direct_play_url,
                     subtitles=external_subtitles,
-                    behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
+                    behaviorHints={
+                        'bingeGroup': quality_description,
+                        'filename': filename,
+                        'videoSize': video_size,
+                    },
                 ),
             )
 
@@ -261,7 +288,11 @@ class PlexMediaMeta(BaseModel):
                         ),
                         url=str(transcode_url % {'videoQuality': 100}),
                         subtitles=external_subtitles,
-                        behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
+                        behaviorHints={
+                            'bingeGroup': quality_description,
+                            'filename': filename,
+                            'videoSize': video_size,
+                        },
                     ),
                 )
 
@@ -281,7 +312,11 @@ class PlexMediaMeta(BaseModel):
                             ),
                             url=str(transcode_url % quality_params['plex_args']),
                             subtitles=external_subtitles,
-                            behaviorHints={'bingeGroup': quality_description, 'filename': filename, 'videoSize': video_size},
+                            behaviorHints={
+                                'bingeGroup': quality_description,
+                                'filename': filename,
+                                'videoSize': video_size,
+                            },
                         ),
                     )
 
@@ -341,7 +376,11 @@ class PlexEpisodeMeta(BaseModel):
             )
 
         return StremioVideoMeta(
-            id=guid_to_plexio_id(self.guid),
+            id=(
+                rating_key_to_plexio_id(self.rating_key)
+                if self.rating_key
+                else guid_to_plexio_id(self.guid)
+            ),
             title=self.title,
             released=released,
             thumbnail=str(

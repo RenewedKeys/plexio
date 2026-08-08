@@ -88,7 +88,7 @@ async def health_backend(
 @router.post('/sessions')
 async def create_session(
     request: Request,
-    config: dict = Body(...),
+    config: dict = Body(...),  # noqa: B008
     label: str | None = None,
 ):
     """Create a server-side session that stores the addon configuration.
@@ -110,7 +110,7 @@ async def create_session(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Invalid configuration: {exc}',
-        )
+        ) from exc
     session_id = await store.create(config, label=label)
     return {'session_id': session_id}
 

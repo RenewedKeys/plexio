@@ -115,7 +115,8 @@ class SessionStore:
         payload = self._fernet.encrypt(json.dumps(config).encode()).decode()
         await self._db.execute(
             'INSERT INTO sessions '
-            '(session_id, config_json, label, server_name, created_at, last_used_at, config_hash) '
+            '(session_id, config_json, label, server_name, created_at, '
+            'last_used_at, config_hash) '
             'VALUES (?, ?, ?, ?, ?, ?, ?)',
             (session_id, payload, label, server_name, now, now, config_hash),
         )
@@ -144,7 +145,8 @@ class SessionStore:
         config_hash = stored_hash or _config_hash(config)
         if reencrypted is not None:
             await self._db.execute(
-                'UPDATE sessions SET config_json = ?, last_used_at = ?, config_hash = ? '
+                'UPDATE sessions SET config_json = ?, last_used_at = ?, '
+                'config_hash = ? '
                 'WHERE session_id = ?',
                 (reencrypted, now, config_hash, session_id),
             )

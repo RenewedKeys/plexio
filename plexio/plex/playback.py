@@ -54,7 +54,7 @@ async def _timeline(client, *, url, token, rating_key, state, time_ms,
 
 
 def _total_and_start(resp):
-    """Full file size + start offset, from Content-Range (206) or Content-Length (200)."""
+    """Return the full file size and start offset from response headers."""
     cr = resp.headers.get('Content-Range')
     if cr and '/' in cr:
         try:

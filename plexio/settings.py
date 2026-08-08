@@ -24,14 +24,18 @@ class Settings(BaseSettings):
     cache_type: CacheType = CacheType.memory
     redis_url: str = 'redis://redis:6399/0'
     plex_matching_token: str | None = None
-    base_url: str | None = None  # Public-facing URL when behind reverse proxy / tunnel (e.g. https://plexio.example.com). Used to generate install URLs from the configure page. Falls back to window.location.origin if unset.
+    # Public-facing URL behind a reverse proxy or tunnel. The configure page
+    # falls back to window.location.origin when this is unset.
+    base_url: str | None = None
 
     # Server-side session storage (0.4.0): store config/token in SQLite keyed
     # by session id in the URL, instead of base64 in the install URL itself.
     session_db_path: str = '/data/sessions.db'
-    admin_key: str | None = None  # gates session list/revoke endpoints; 403 if unset
+    # Gates session list/revoke endpoints; those endpoints return 403 if unset.
+    admin_key: str | None = None
     enable_sessions: bool = True
-    session_encryption_key: str | None = None  # Fernet key; if unset, a key file is auto-created next to the DB
+    # Fernet key; an adjacent key file is created when this is unset.
+    session_encryption_key: str | None = None
 
 
 settings = Settings()
