@@ -55,7 +55,8 @@ class StremioStreamBehaviorHints(StremioBase):
     not_web_ready: bool = False
     binge_group: str | None = None
     proxy_headers: dict | None = None
-    filename: str | None = None  # For client-side release fingerprinting (IntroDB, etc.)
+    # Used by clients for release fingerprinting (IntroDB, etc.).
+    filename: str | None = None
     video_size: int | None = None  # Stremio-standard byte size of the underlying file
 
 

@@ -180,7 +180,7 @@ class PlexMediaMeta(BaseModel):
             genres=[g['tag'] for g in self.genre],
         )
 
-    def get_stremio_streams(self, configuration, play_prefix=None):
+    def get_stremio_streams(self, configuration, play_prefix=None):  # noqa: C901
         import base64
 
         from plexio.models.stremio import StremioStream

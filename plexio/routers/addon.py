@@ -301,8 +301,8 @@ async def get_meta(
         # links.
         try:
             guid = plexio_id_to_guid(plex_id)
-        except (ValueError, UnicodeDecodeError):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from None
         media = await get_media(
             client=http,
             url=configuration.discovery_url,
@@ -412,7 +412,10 @@ async def get_stream(
             )
     elif media_id.startswith('plexio:'):
         # Backward compatibility for legacy GUID-based internal IDs.
-        plex_id = plexio_id_to_guid(media_id)
+        try:
+            plex_id = plexio_id_to_guid(media_id)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from None
         media = await get_media(
             client=http,
             url=configuration.discovery_url,

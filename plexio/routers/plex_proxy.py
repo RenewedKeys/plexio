@@ -3,7 +3,7 @@ from typing import Annotated, Any
 
 import aiohttp
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 
 from plexio.dependencies import get_http_client
 from plexio.settings import settings
@@ -56,6 +56,7 @@ async def create_plex_pin(
         ...,
         alias='X-Plex-Client-Identifier',
         min_length=1,
+        max_length=255,
     ),
 ):
     return await _plex_request(
@@ -69,14 +70,15 @@ async def create_plex_pin(
 
 @router.get('/plex-token/{pin_id}')
 async def get_plex_token(
-    pin_id: int,
     http: Annotated[ClientSession, Depends(get_http_client)],
+    pin_id: int = Path(..., gt=0),
     client_identifier: str = Header(
         ...,
         alias='X-Plex-Client-Identifier',
         min_length=1,
+        max_length=255,
     ),
-    code: str = Query(..., min_length=1),
+    code: str = Query(..., min_length=1, max_length=255),
 ):
     return await _plex_request(
         http,
@@ -94,10 +96,16 @@ async def get_plex_resources(
         ...,
         alias='X-Plex-Client-Identifier',
         min_length=1,
+        max_length=255,
     ),
-    token: str = Header(..., alias='X-Plex-Token', min_length=1),
-    include_https: int = Query(1, alias='includeHttps'),
-    include_relay: int = Query(1, alias='includeRelay'),
+    token: str = Header(
+        ...,
+        alias='X-Plex-Token',
+        min_length=1,
+        max_length=4096,
+    ),
+    include_https: int = Query(1, alias='includeHttps', ge=0, le=1),
+    include_relay: int = Query(1, alias='includeRelay', ge=0, le=1),
 ):
     return await _plex_request(
         http,
