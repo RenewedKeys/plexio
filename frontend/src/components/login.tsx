@@ -2,6 +2,8 @@ import { Button } from '@/components/ui/button.tsx';
 import useClientIdentifier from '@/hooks/useClientIdentifier.tsx';
 import { createAuthPin } from '@/services/PlexService.tsx';
 
+const PLEX_PRODUCT_NAME = 'Plexio';
+
 const Login = () => {
   const clientIdentifier = useClientIdentifier();
 
@@ -9,15 +11,19 @@ const Login = () => {
     const { origin, pathname } = window.location;
 
     const authPin = await createAuthPin(clientIdentifier);
-    const currentPath = encodeURIComponent(pathname);
+    const forwardUrl = new URL('/auth-redirect', origin);
+    forwardUrl.searchParams.set('code', authPin.code);
+    forwardUrl.searchParams.set('id', authPin.id);
+    forwardUrl.searchParams.set('redirect', pathname);
 
-    const redirectParams = `code=${authPin.code}&id=${authPin.id}&redirect=${currentPath}`;
-    const forwardUrl = encodeURIComponent(
-      `${origin}/auth-redirect?${redirectParams}`,
-    );
+    const loginParams = new URLSearchParams({
+      clientID: clientIdentifier,
+      code: authPin.code,
+      forwardUrl: forwardUrl.toString(),
+    });
+    loginParams.set('context[device][product]', PLEX_PRODUCT_NAME);
 
-    const loginParams = `code=${authPin.code}&forwardUrl=${forwardUrl}&clientID=${clientIdentifier}`;
-    window.location.href = `https://app.plex.tv/auth#?${loginParams}`;
+    window.location.href = `https://app.plex.tv/auth#?${loginParams.toString()}`;
   };
 
   return (

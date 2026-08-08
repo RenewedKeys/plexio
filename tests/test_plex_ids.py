@@ -14,7 +14,7 @@ from plexio.models.utils import (
     plexio_id_to_rating_key,
     rating_key_to_plexio_id,
 )
-from plexio.routers.addon import get_meta, get_stream
+from plexio.routers.addon import _public_base_url, get_meta, get_stream
 
 CONFIGURATION = SimpleNamespace(
     discovery_url=URL('https://plex.example.test'),
@@ -33,7 +33,11 @@ STREAM_CONFIGURATION = SimpleNamespace(
 )
 
 
-def streamable_media(rating_key: str, media_type: str = 'movie'):
+def streamable_media(
+    rating_key: str,
+    media_type: str = 'movie',
+    duration: int | None = None,
+):
     return PlexMediaMeta(
         guid=f'local://{media_type}/{rating_key}',
         type=media_type,
@@ -41,6 +45,7 @@ def streamable_media(rating_key: str, media_type: str = 'movie'):
         ratingKey=rating_key,
         key=f'/library/metadata/{rating_key}',
         librarySectionTitle='Personal',
+        duration=duration,
         Media=[
             {
                 'Part': [
@@ -124,6 +129,17 @@ class PlexIdTests(TestCase):
 
 
 class PlexIdRouteTests(IsolatedAsyncioTestCase):
+    def test_public_base_url_uses_forwarded_https_origin(self):
+        request = SimpleNamespace(
+            headers={
+                'x-forwarded-proto': 'https',
+                'x-forwarded-host': 'plexio.example.test',
+            },
+            url=URL('http://internal.test/session/stream/movie/id.json'),
+        )
+
+        self.assertEqual(_public_base_url(request), 'https://plexio.example.test')
+
     @patch('plexio.routers.addon.get_media_by_rating_key', new_callable=AsyncMock)
     async def test_meta_route_resolves_rating_key(self, get_by_rating_key):
         http = object()
@@ -226,4 +242,42 @@ class PlexIdRouteTests(IsolatedAsyncioTestCase):
         self.assertEqual(
             get_by_rating_key.await_args_list[1].kwargs['rating_key'],
             '200',
+        )
+
+    @patch('plexio.routers.addon.get_media_by_rating_key', new_callable=AsyncMock)
+    async def test_playback_stream_uses_public_origin_and_media_duration(
+        self,
+        get_by_rating_key,
+    ):
+        get_by_rating_key.return_value = [streamable_media('123', duration=120_000)]
+        configuration = SimpleNamespace(
+            **{
+                key: value
+                for key, value in vars(STREAM_CONFIGURATION).items()
+                if key != 'report_playback'
+            },
+            report_playback=True,
+        )
+        request = SimpleNamespace(
+            headers={
+                'x-forwarded-proto': 'https',
+                'x-forwarded-host': 'plexio.example.test',
+            },
+            url=URL('http://internal.test/session-id/stream/movie/plexio:rk-123.json'),
+        )
+
+        response = await get_stream(
+            request=request,
+            http=object(),
+            cache=object(),
+            configuration=configuration,
+            stremio_type=StremioMediaType.movie,
+            media_id='plexio:rk-123',
+        )
+
+        self.assertEqual(len(response.streams), 1)
+        self.assertTrue(
+            response.streams[0].url.startswith(
+                'https://plexio.example.test/session-id/play/123/120000/'
+            )
         )

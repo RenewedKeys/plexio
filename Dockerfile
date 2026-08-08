@@ -1,11 +1,11 @@
-FROM --platform=$BUILDPLATFORM node:18.2.0-alpine AS build
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 
 WORKDIR /app
 
 COPY frontend/package.json .
 COPY frontend/package-lock.json .
 
-RUN npm install
+RUN npm ci
 
 COPY frontend .
 

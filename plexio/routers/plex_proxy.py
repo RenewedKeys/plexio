@@ -3,7 +3,17 @@ from typing import Annotated, Any
 
 import aiohttp
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    status,
+)
+from yarl import URL
 
 from plexio.dependencies import get_http_client
 from plexio.settings import settings
@@ -16,6 +26,38 @@ PLEX_HEADERS = {
     'X-Plex-Product': 'Plexio',
     'X-Plex-Version': '1.0.0',
 }
+
+
+def _request_origin(request: Request) -> str:
+    """Return the public browser origin Plex should bind to a new PIN."""
+    candidates = [
+        request.headers.get('origin'),
+        request.headers.get('referer'),
+        settings.base_url,
+    ]
+    forwarded_proto = request.headers.get('x-forwarded-proto')
+    forwarded_host = request.headers.get('x-forwarded-host')
+    if forwarded_proto and forwarded_host:
+        candidates.append(
+            f'{forwarded_proto.split(",", 1)[0].strip()}://'
+            f'{forwarded_host.split(",", 1)[0].strip()}'
+        )
+    candidates.append(str(request.url))
+
+    for candidate in candidates:
+        if not candidate or candidate == 'null':
+            continue
+        try:
+            origin = URL(candidate).origin()
+        except (TypeError, ValueError):
+            continue
+        if origin.scheme in {'http', 'https'} and origin.host:
+            return str(origin)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail='Unable to determine a valid public origin',
+    )
 
 
 async def _plex_request(
@@ -51,6 +93,7 @@ async def _plex_request(
 
 @router.post('/plex-pin')
 async def create_plex_pin(
+    request: Request,
     http: Annotated[ClientSession, Depends(get_http_client)],
     client_identifier: str = Header(
         ...,
@@ -63,7 +106,12 @@ async def create_plex_pin(
         http,
         'POST',
         '/pins',
-        headers={'X-Plex-Client-Identifier': client_identifier},
+        headers={
+            'X-Plex-Client-Identifier': client_identifier,
+            # Plex validates the Auth App forwardUrl hostname against the
+            # origin recorded when the PIN is created.
+            'Origin': _request_origin(request),
+        },
         params={'strong': 'true'},
     )
 

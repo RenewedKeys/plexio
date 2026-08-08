@@ -17,6 +17,8 @@
 - **Continue Watching & Recently Added catalogs** — adds discovery rows to the Stremio board: "Continue Watching" (Plex On Deck — in-progress movies plus next-up/in-progress episodes, the latter surfaced as their parent series, deduped) and "Recently Added", each split into Movies / Shows and shown only for the library types you've configured. Catalog items resolve through the normal meta/stream flow (imdb-matched where Plex has the id). Discovery rows only — these don't feed Stremio's native Continue Watching bar, and a series row opens the show page rather than resuming the exact episode. (0.6.0)
 - **Hybrid IMDb/rating-key IDs** — keeps standard IMDb IDs when Plex provides them, then falls back to validated Plex rating-key IDs for unmatched and personal movies, shows, and episodes. This restores stream resolution in Fusion and other Stremio-compatible clients without breaking legacy Plexio IDs. (0.8.0)
 - **Server-side Plex authentication proxy** — proxies PIN creation, token exchange, and server discovery through the backend so self-hosted installs no longer depend on Plex allowing browser-side cross-origin requests. Inputs and upstream failures are validated and covered by regression tests. (0.8.0)
+- **Reliable self-hosted Plex sign-in** — binds each Plex PIN to the configure page's public origin and supplies Plex's product context, allowing the Auth App to validate and return to self-hosted callback URLs. (0.8.1)
+- **Live playback reporting** — the opt-in playback proxy now sends conservative, elapsed-time Plex timeline updates during playback, supports Stremio HEAD probes, and builds externally reachable stream URLs from `BASE_URL` or forwarded proxy headers. (0.8.1)
 
 ## Installation
 
@@ -29,6 +31,12 @@ Or build from source with `docker build -t plexio-fork .`.
 **Persistent storage (sessions):** the optional server-side session store keeps a SQLite DB at `/data/sessions.db`. The image creates `/data` owned by the `unit` app user (uid 999), so a Docker **named volume** (as above) inherits writable ownership automatically. If you bind-mount a host directory instead, `chown 999:999` it first. Disable the store entirely with `ENABLE_SESSIONS=false`, in which case no `/data` access is needed.
 
 **Session env vars:** `ADMIN_KEY` enables and protects the list/revoke endpoints (unset = those endpoints return 403). `SESSION_ENCRYPTION_KEY` sets the Fernet key for encryption at rest; if unset, a key file is created automatically alongside the database.
+
+**Reverse proxies and playback reporting:** set `BASE_URL` to Plexio's externally reachable URL, including `https://` and any path prefix (for example, `BASE_URL=https://plexio.example.com`). This is required when a proxy does not preserve `X-Forwarded-Proto` and `X-Forwarded-Host`. The “Report playback to Plex” option routes Direct Play media through Plexio, so that URL must be reachable from the device running Stremio.
+
+### Remote Plex servers and Plex Pass
+
+Plexio does not itself require Plex Pass, but it does not bypass Plex's remote-playback rules. A Plex server on a VPS is normally considered remote. For remote personal-video playback, Plex currently requires at least one of the following: the server administrator has Plex Pass, the viewer has Plex Pass, or the viewer has a Remote Watch Pass. The server must also be reachable from Plexio and have Remote Access configured. Plex notes that servers hosted by online providers may not work with every provider. See Plex's [remote playback requirements](https://support.plex.tv/articles/requirements-for-remote-playback-of-personal-media/) and [server requirements](https://support.plex.tv/articles/200375666-plex-media-server-requirements/).
 
 ## Roadmap
 
