@@ -10,10 +10,11 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx';
+import { PlexSection } from '@/types/plex.tsx';
 
 interface Props {
   form: UseFormReturn<ConfigurationFormType>;
-  sections: any[];
+  sections: PlexSection[];
 }
 
 export const SectionsField: FC<Props> = ({ form, sections }) => {
@@ -30,7 +31,7 @@ export const SectionsField: FC<Props> = ({ form, sections }) => {
             </FormDescription>
           </div>
           {sections.length > 0 ? (
-            sections.map((item: any) => (
+            sections.map((item) => (
               <FormField
                 key={item.key}
                 control={form.control}
@@ -47,7 +48,7 @@ export const SectionsField: FC<Props> = ({ form, sections }) => {
                           onCheckedChange={(checked) => {
                             return checked
                               ? field.onChange([
-                                  ...(field.value || []),
+                                  ...(field.value ?? []),
                                   {
                                     key: item.key,
                                     title: item.title,

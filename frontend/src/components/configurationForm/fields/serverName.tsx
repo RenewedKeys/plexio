@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select.tsx';
+import { PlexServer } from '@/types/plex.tsx';
 
 interface Props {
   form: UseFormReturn<ConfigurationFormType>;

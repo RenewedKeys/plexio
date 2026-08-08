@@ -17,19 +17,28 @@ const AuthRedirectPage: FC<Props> = ({ setPlexToken }) => {
   useEffect(() => {
     if (!clientIdentifier) return;
 
-    const { id, code, redirect } = Object.fromEntries(searchParams.entries());
+    const id = searchParams.get('id');
+    const code = searchParams.get('code');
+    const redirect = searchParams.get('redirect');
+    const safeRedirect =
+      redirect?.startsWith('/') &&
+      !redirect.startsWith('//') &&
+      !redirect.includes('\\')
+        ? redirect
+        : '/';
 
     const setAuthToken = async (): Promise<void> => {
-      const authToken = await getAuthToken(
-        { id: id, code: code },
-        clientIdentifier,
-      );
+      if (!id || !code) {
+        void navigate('/', { replace: true });
+        return;
+      }
+      const authToken = await getAuthToken({ id, code }, clientIdentifier);
       setPlexToken(authToken);
+      void navigate(safeRedirect, { replace: true });
     };
 
     void setAuthToken();
-    navigate(redirect);
-  }, [searchParams, clientIdentifier, navigate]);
+  }, [searchParams, clientIdentifier, navigate, setPlexToken]);
 
   return <Loading />;
 };
